@@ -1,0 +1,22 @@
+Fish Speech S2 Pro - H100 quality samples
+GPU: H100 | vLLM 0.22.1 + vllm-omni 0.22.0
+voice: registered from tts.wav (ref_text: 'Hello, this is Fish Speech S2 Pro running on Modal.')
+
+01_short_greeting.wav
+  Hello! Welcome to the Fish Speech S2 Pro demo. How are you doing today?
+
+02_medium_narrative.wav
+  The old lighthouse stood at the edge of the cliff, its beam sweeping slowly across the dark water. For nearly a century it had guided ships safely home through fog and storm.
+
+03_long_form.wav
+  Artificial speech has come a long way in just a few short years. What once sounded robotic and flat can now carry warmth, rhythm, and genuine emotion. As these models grow more capable, they open up new possibilities for storytelling, accessibility, and everyday communication. The challenge ahead is not only making voices that sound human, but making them expressive, reliable, and fast enough to use in real time, across many languages.
+
+04_emotion_tags.wav
+  I can't believe we actually pulled this off! [laughing] This is the best day ever. [whispering] But let's keep it a secret for now. [angry] And tell no one who dares to ask.
+
+05_numbers_prosody.wav
+  On March 3rd, 2026, the team shipped version 0.22.1, cutting latency by 37 percent. Isn't that incredible? You can reach me at 555-0192 any time.
+
+06_inline_clone.wav
+  (same text as 01, via inline ref_audio+ref_text instead of the registered voice -- compare voice match/quality)
+  Hello! Welcome to the Fish Speech S2 Pro demo. How are you doing today?

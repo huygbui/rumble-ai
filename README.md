@@ -7,13 +7,25 @@ as an OpenAI-compatible Text-to-Speech endpoint on Modal, via vLLM-Omni.
 - Output: 44.1 kHz mono WAV (DAC codec)
 - GPU: one 80GB card (~49 GiB peak)
 
+> **Evaluating alternatives.** Fish S2 Pro is the baseline. This repo now also hosts two
+> candidate models being evaluated for a **kid-facing, Australian-English** conversation
+> experience. The full ranked comparison of 8 TTS/S2S options (with sources) lives in
+> [`docs/tts-options-research.md`](docs/tts-options-research.md). All three models share
+> the OpenAI-compatible `/v1/audio/speech` shape, so one `client.py` drives them via
+> `TTS_MODEL` — see [Alternatives under evaluation](#alternatives-under-evaluation).
+
 ## Files
 
 - `fish_s2_pro_modal.py` — Modal app: builds the image, caches weights on a Volume,
   runs `vllm serve fishaudio/s2-pro --omni` as a web server.
-- `client.py` — registers a reusable voice then synthesizes by name (`tts.wav`), and
-  does inline voice cloning (`cloned.wav`).
+- `omnivoice_modal.py` — Modal app for **OmniVoice** (`k2-fsa/OmniVoice`), the top
+  alternative: Apache-2.0, native `australian accent` voice-design. *(under evaluation)*
+- `qwen3_tts_modal.py` — Modal app for **Qwen3-TTS-1.7B** (Alibaba), the de-risked
+  hedge: Apache-2.0, natural streaming English. *(under evaluation)*
+- `client.py` — generalized client for all three endpoints; picks the per-model request
+  shape via `TTS_MODEL` (writes `tts.wav` / `cloned.wav` / `omnivoice_design.wav` / …).
 - `bench_tts.py` — latency / streaming / concurrency benchmark.
+- `docs/tts-options-research.md` — ranked evaluation of TTS/S2S options for this use case.
 
 ## 1. Prereqs
 
@@ -80,6 +92,42 @@ Two ways to give S2 Pro a voice:
 
 `bench_tts.py` is a quick latency/throughput benchmark; it registers one voice up
 front and then synthesizes by name (set `REF_AUDIO`/`REF_TEXT` as above).
+
+## Alternatives under evaluation
+
+Two candidate models for a kid-facing, Australian-English conversation experience, served
+the same way (OpenAI-compatible `/v1/audio/speech`). Both verified end-to-end on Modal.
+See [`docs/tts-options-research.md`](docs/tts-options-research.md) for why these two.
+
+`client.py` targets any endpoint via `TTS_MODEL`:
+
+```bash
+# OmniVoice — Australian-accent kid voice via DESIGN (no reference clip needed):
+modal deploy omnivoice_modal.py
+export TTS_URL="https://<workspace>--omnivoice-tts-serve.modal.run"
+TTS_MODEL=omnivoice python client.py            # -> omnivoice_design.wav
+
+# Qwen3-TTS — preset speaker (CustomVoice); AU via cloning needs the -Base variant:
+modal deploy qwen3_tts_modal.py
+export TTS_URL="https://<workspace>--qwen3-tts-serve.modal.run"
+TTS_MODEL=qwen-customvoice TTS_VOICE=vivian python client.py   # -> qwen_customvoice.wav
+```
+
+`TTS_MODEL` values: `fish | omnivoice | qwen-customvoice | qwen-base | qwen-voicedesign`.
+For voice **cloning** (Fish, `qwen-base`, or optional on OmniVoice), set `REF_AUDIO` +
+`REF_TEXT` to a consented reference clip as in §3.
+
+Two model-specific gotchas (documented in-file):
+
+- **OmniVoice needs the vLLM-Omni 0.23 line.** Its online voice-design adapter
+  ([PR #4330](https://github.com/vllm-project/vllm-omni/pull/4330)) is **not** in the
+  0.22.0 stable wheel — on 0.22.0 the `instructions` path emits artifacts (noise), not a
+  conditioned voice. The app installs `vllm-omni==0.23.0rc1` from its git tag (it isn't on
+  PyPI) paired with `vllm==0.23.0`. Runs on a 24GB GPU (A10G), not 80GB.
+- **Qwen3-TTS needs an 80GB H100.** Its shipped two-stage `qwen3_tts.yaml` deploy-config
+  is "Verified on 1×H100" (talker + code2wav co-located at `0.3` memory each); a 48GB L40S
+  OOMs the code2wav stage at startup. Do **not** pass `--gpu-memory-utilization` on the CLI
+  — it overrides the per-stage split. Stays on the 0.22.0 stable stack (works there).
 
 ## Notes
 
