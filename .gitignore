@@ -12,3 +12,6 @@ wheels/
 # Generated audio (client.py outputs)
 *.wav
 *.mp3
+
+# macOS
+.DS_Store
