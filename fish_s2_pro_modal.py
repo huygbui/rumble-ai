@@ -25,19 +25,26 @@ VLLM_VERSION = "0.19.0"  # recipe-stated minimum + tested version for s2-pro
 VLLM_OMNI_COMMIT = "c93359bb354a6aa5c14d062430cb85b2c4db251e"  # recipe-pinned commit
 
 # --- Container image -----------------------------------------------------------
-# CUDA 12.8 per recipe. Install order matters:
-#   1. vllm pinned to 0.19.0 with --torch-backend=auto so uv resolves the torch
-#      wheel matching the CUDA 12.8 base image (vllm compiles CUDA kernels and is
-#      binary-incompatible across CUDA/torch builds; the recipe + install doc both
-#      use this flag).
+# CUDA 12.8 per recipe. Install order matters (mirrors the s2-pro recipe, which uses
+# `uv pip install` for vllm/vllm-omni and a plain `pip install fish-speech`):
+#   1. vllm pinned to 0.19.0. NOTE: we deliberately do NOT pass the recipe's
+#      `--torch-backend=auto`. That flag detects CUDA from the *build* host, but
+#      Modal's image builder has no GPU, so `auto` installs a CPU-only torch
+#      (torch==X+cpu, missing libtorch_cuda.so) that then fails to import on the GPU
+#      at runtime. Omitting it makes uv pull the default PyPI torch, which IS the
+#      CUDA build (this matches Modal's official vLLM example).
 #   2. vllm-omni from the recipe-pinned git commit (provides the --omni TTS stack
-#      and pulls its own correct transformers; do NOT hand-pin transformers here --
-#      vllm-omni excludes the 5.3.* line, which an earlier draft floor required).
-#   3. fish-speech for the DAC codec the model loads at startup.
+#      and its own transformers); this pulls x-transformers>=2.12.2 -> einx>=0.3.0.
+#   3. fish-speech (DAC codec) installed SEPARATELY with permissive pip. It is NOT
+#      in the uv step above on purpose: fish-speech hard-pins einx==0.2.2, which is
+#      mutually exclusive with vllm-omni's einx>=0.3.0, so uv's strict resolver
+#      aborts if asked to satisfy both at once. pip (like the recipe's
+#      `pip install fish-speech`) just downgrades einx to 0.2.2 and warns that
+#      x-transformers wants newer einx -- the s2-pro DAC path needs 0.2.2.
 # NOTE: `vllm-omni` IS a real PyPI package, but the PyPI release version-matches a
 # newer vllm (latest -> vLLM 0.23.0). The risk is version pairing, not the package
-# name. If you want PyPI latest instead, install vllm==0.23.0 (with
-# --torch-backend=auto) and then plain `vllm-omni` -- keep the pair consistent.
+# name. If you want PyPI latest instead, install vllm==0.23.0 and then plain
+# `vllm-omni` -- keep the pair consistent (still without --torch-backend on Modal).
 image = (
     modal.Image.from_registry(
         "nvidia/cuda:12.8.1-devel-ubuntu22.04", add_python="3.12"
@@ -46,13 +53,27 @@ image = (
     .apt_install("libportaudio2", "portaudio19-dev", "git", "libsndfile1")
     .uv_pip_install(
         f"vllm=={VLLM_VERSION}",
-        extra_options="--torch-backend=auto",
     )
     .uv_pip_install(
         f"vllm-omni @ git+https://github.com/vllm-project/vllm-omni.git@{VLLM_OMNI_COMMIT}",
-        "fish-speech",
         "huggingface_hub[hf_transfer]",
     )
+    # fish-speech pulls pyaudio, which builds a C extension -> needs a compiler.
+    # Add it AFTER the uv steps so the cached vllm/vllm-omni layers aren't
+    # invalidated; portaudio19-dev (its headers) is already in the apt step above.
+    .apt_install("build-essential", "clang")
+    # Permissive pip step (NOT uv): tolerates the einx==0.2.2 vs >=0.3.0 conflict.
+    .pip_install("fish-speech")
+    # fish-speech's heavy dep tree (gradio/tensorboard/wandb/...) downgrades two
+    # libs that vllm needs newer, which would crash vllm at import:
+    #   - pydantic: fish-speech hard-pins ==2.9.2; vllm (and mcp/openai-harmony)
+    #     need >=2.12.0.
+    #   - protobuf: pulled down to 3.19.6; vllm needs >=5.29.6 (protobuf 3 vs 5
+    #     generated code is ABI-incompatible).
+    # Restore both LAST. Safe: the serving path is vllm + the DAC codec
+    # (descript-audio-codec), not fish-speech's pydantic schemas / protobuf users
+    # (tensorboard/wandb/gradio webui), none of which run during TTS serving.
+    .pip_install("pydantic>=2.12.0", "protobuf>=5.29.6,<6")
     .env(
         {
             "HF_HUB_ENABLE_HF_TRANSFER": "1",

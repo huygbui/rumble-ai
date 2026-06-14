@@ -8,3 +8,7 @@ wheels/
 
 # Virtual environments
 .venv
+
+# Generated audio (client.py outputs)
+*.wav
+*.mp3
