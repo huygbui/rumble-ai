@@ -1,18 +1,18 @@
-# omnivoice_modal.py
+# tts/omnivoice.py
 # Serve OmniVoice (k2-fsa/OmniVoice) TTS on Modal via vLLM-Omni.
 # Exposes the OpenAI-compatible POST /v1/audio/speech endpoint on a single small GPU.
 #
-#   modal deploy omnivoice_modal.py   # persistent endpoint
-#   modal serve  omnivoice_modal.py   # ephemeral hot-reload dev server
-#   modal run    omnivoice_modal.py   # health-check via local_entrypoint
+#   modal deploy tts/omnivoice.py   # persistent endpoint
+#   modal serve  tts/omnivoice.py   # ephemeral hot-reload dev server
+#   modal run    tts/omnivoice.py   # health-check via local_entrypoint
 #
-# Why OmniVoice (vs the fish_s2_pro_modal.py baseline):
+# Why OmniVoice (vs the tts/fish_s2_pro.py baseline):
 #   - Apache-2.0 (open commercial use, no contact) vs Fish's research-only license.
 #   - ~613M params / 2.45GB weights + ~806MB 24kHz codec -> runs on a 24GB card, not 80GB.
 #   - The ONLY candidate with a NATIVE "australian accent" voice-design attribute, plus
 #     "child"/"teenager" age attributes -- directly serves the kid + AU-English goal.
 # It is pure TTS (no S2S, no built-in safety): all kid-safety/boundary/OOD handling must
-# live in your upstream dialogue + moderation layer. See docs/tts-options-research.md.
+# live in your upstream dialogue + moderation layer. See docs/tts-options.md.
 #
 # STATUS: VERIFIED end-to-end on Modal (2026-06-14), on the 0.23 stack (vLLM 0.23.0 +
 # vllm-omni 0.23.0rc1) + A10G. On the older 0.22.0 stack the voice-design `instructions`

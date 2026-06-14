@@ -1,10 +1,10 @@
-# fish_s2_pro_modal.py
+# tts/fish_s2_pro.py
 # Serve Fish Speech S2 Pro (fishaudio/s2-pro) TTS on Modal via vLLM-Omni.
 # Exposes the OpenAI-compatible POST /v1/audio/speech endpoint on a single 80GB GPU.
 #
-#   modal deploy fish_s2_pro_modal.py   # persistent endpoint
-#   modal serve  fish_s2_pro_modal.py   # ephemeral hot-reload dev server
-#   modal run    fish_s2_pro_modal.py   # health-check via local_entrypoint
+#   modal deploy tts/fish_s2_pro.py   # persistent endpoint
+#   modal serve  tts/fish_s2_pro.py   # ephemeral hot-reload dev server
+#   modal run    tts/fish_s2_pro.py   # health-check via local_entrypoint
 
 import subprocess
 

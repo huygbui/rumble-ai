@@ -6,7 +6,7 @@ GPU, the vLLM/vllm-omni versions, batching, or warm-pool settings.
 
 - **Date:** 2026-06-14
 - **Endpoint:** `https://huygbui--fish-s2-pro-tts-serve.modal.run` (`POST /v1/audio/speech`)
-- **Benchmark script:** [`bench_tts.py`](./bench_tts.py) — re-run to compare against this baseline.
+- **Benchmark script:** [`bench.py`](../bench.py) — re-run to compare against this baseline.
 
 ## Test environment (deployed config at time of test)
 
@@ -27,7 +27,7 @@ Resource usage observed at load: model weights ~**10.9 GiB**; KV cache **47.5 Gi
 
 ## Methodology
 
-`bench_tts.py` sends non-streaming `POST /v1/audio/speech` requests (`voice=default`,
+`bench.py` sends non-streaming `POST /v1/audio/speech` requests (`voice=default`,
 `response_format=wav`, `seed=58842`) and measures wall-clock latency. Audio duration
 is read from the returned WAV header; **RTF = latency / audio_seconds** (lower is
 better; <1.0 = faster than real time). Warm rows are the **median of 3 runs**. Text
@@ -88,5 +88,5 @@ in roughly the wall-time of a single request.
 
 ```bash
 export TTS_URL="https://huygbui--fish-s2-pro-tts-serve.modal.run"
-uv run python bench_tts.py
+uv run python bench.py
 ```

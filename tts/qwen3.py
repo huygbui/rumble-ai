@@ -1,18 +1,18 @@
-# qwen3_tts_modal.py
+# tts/qwen3.py
 # Serve Qwen3-TTS-12Hz-1.7B (Alibaba Qwen) TTS on Modal via vLLM-Omni.
 # Exposes the OpenAI-compatible POST /v1/audio/speech endpoint on a single GPU.
 #
-#   modal deploy qwen3_tts_modal.py   # persistent endpoint
-#   modal serve  qwen3_tts_modal.py   # ephemeral hot-reload dev server
-#   modal run    qwen3_tts_modal.py   # health-check via local_entrypoint
+#   modal deploy tts/qwen3.py   # persistent endpoint
+#   modal serve  tts/qwen3.py   # ephemeral hot-reload dev server
+#   modal run    tts/qwen3.py   # health-check via local_entrypoint
 #
-# Why Qwen3-TTS (the de-risked hedge alongside omnivoice_modal.py):
+# Why Qwen3-TTS (the de-risked hedge alongside tts/omnivoice.py):
 #   - Apache-2.0 (open commercial use, no contact) vs Fish's research-only license.
 #   - Top-tier, well-maintained provider (Alibaba Qwen); natural, warm streaming English.
 #   - ~1.7B / ~3.8GB weights + ~0.68GB codec -> a 48GB card, not the 80GB Fish needs.
 # No NATIVE Australian English: AU is reached via zero-shot cloning of a consented AU
 # clip (the -Base variant). Pure TTS, no built-in safety -- kid-safety/boundary/OOD must
-# live upstream. See docs/tts-options-research.md.
+# live upstream. See docs/tts-options.md.
 #
 # STATUS: VERIFIED end-to-end on Modal (2026-06-14). The online /v1/audio/speech path for
 # Qwen3-TTS is shipped in vllm-omni 0.22.0 (the old "offline-only" note is stale). The

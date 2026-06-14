@@ -1,7 +1,7 @@
 [project]
 name = "rumble-ai"
 version = "0.1.0"
-description = "Add your description here"
+description = "Self-hosted voice pipeline (STT -> LLM -> TTS) served on Modal"
 readme = "README.md"
 requires-python = ">=3.14"
 dependencies = [

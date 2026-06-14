@@ -1,31 +1,38 @@
-# Fish Speech S2 Pro on Modal (vLLM-Omni TTS)
+# rumble-ai — self-hosted voice pipeline on Modal
 
-Minimal demo serving [`fishaudio/s2-pro`](https://huggingface.co/fishaudio/s2-pro)
-as an OpenAI-compatible Text-to-Speech endpoint on Modal, via vLLM-Omni.
+A self-hosted **voice conversation** stack served on [Modal](https://modal.com), built up
+one component at a time. Today it hosts the **TTS** stage as a 3-way model bake-off;
+**STT** and **LLM** components — then a back-and-forth `chat.py` loop wiring
+STT → LLM → TTS — are next.
 
-- Endpoint: `POST /v1/audio/speech` (OpenAI-compatible)
-- Output: 44.1 kHz mono WAV (DAC codec)
-- GPU: one 80GB card (~49 GiB peak)
+Every model is served behind the same OpenAI-compatible `POST /v1/audio/speech` shape, so
+one `client.py` drives any of them via `TTS_MODEL`.
 
-> **Evaluating alternatives.** Fish S2 Pro is the baseline. This repo now also hosts two
-> candidate models being evaluated for a **kid-facing, Australian-English** conversation
-> experience. The full ranked comparison of 8 TTS/S2S options (with sources) lives in
-> [`docs/tts-options-research.md`](docs/tts-options-research.md). All three models share
-> the OpenAI-compatible `/v1/audio/speech` shape, so one `client.py` drives them via
-> `TTS_MODEL` — see [Alternatives under evaluation](#alternatives-under-evaluation).
+> **Evaluating models for a kid-facing, Australian-English experience.** Fish S2 Pro is the
+> current TTS baseline; OmniVoice and Qwen3-TTS are candidates under evaluation. The full
+> ranked comparison of 8 TTS/S2S options (with sources) lives in
+> [`docs/tts-options.md`](docs/tts-options.md) — see [Alternatives under evaluation](#alternatives-under-evaluation).
 
-## Files
+## Repo layout
 
-- `fish_s2_pro_modal.py` — Modal app: builds the image, caches weights on a Volume,
-  runs `vllm serve fishaudio/s2-pro --omni` as a web server.
-- `omnivoice_modal.py` — Modal app for **OmniVoice** (`k2-fsa/OmniVoice`), the top
-  alternative: Apache-2.0, native `australian accent` voice-design. *(under evaluation)*
-- `qwen3_tts_modal.py` — Modal app for **Qwen3-TTS-1.7B** (Alibaba), the de-risked
-  hedge: Apache-2.0, natural streaming English. *(under evaluation)*
-- `client.py` — generalized client for all three endpoints; picks the per-model request
-  shape via `TTS_MODEL` (writes `tts.wav` / `cloned.wav` / `omnivoice_design.wav` / …).
-- `bench_tts.py` — latency / streaming / concurrency benchmark.
-- `docs/tts-options-research.md` — ranked evaluation of TTS/S2S options for this use case.
+```
+tts/                  # TTS component — one Modal app per candidate model
+  fish_s2_pro.py      # fishaudio/s2-pro — baseline (research license, ~49 GiB, 80GB GPU)
+  omnivoice.py        # k2-fsa/OmniVoice — top pick (Apache-2.0, native AU accent, 24GB GPU)
+  qwen3.py            # Qwen3-TTS-1.7B (Alibaba) — hedge (Apache-2.0, natural English)
+stt/                  # (next) speech-to-text candidates — one Modal app per model
+llm/                  # (next) dialogue-LLM candidates — one Modal app per model
+client.py             # drive any /v1/audio/speech endpoint; per-model shape via TTS_MODEL
+bench.py              # latency / streaming / concurrency benchmark
+docs/
+  tts-options.md      # ranked evaluation of TTS/S2S options for this use case
+  perf-baseline.md    # Fish S2 Pro performance baseline
+  fish-cold-start.md  # Fish S2 Pro cold-start investigation
+samples/              # demo audio (MANIFEST.txt tracked; *.wav gitignored)
+```
+
+Each pipeline stage is its own top-level folder holding one Modal app per candidate
+model; `stt/` and `llm/` follow the same pattern as `tts/` when those components land.
 
 ## 1. Prereqs
 
@@ -43,10 +50,10 @@ use needs a separate license from `business@fish.audio`.
 
 ```bash
 # ephemeral dev server (hot reload, prints the URL):
-modal serve fish_s2_pro_modal.py
+modal serve tts/fish_s2_pro.py
 
 # OR persistent deployment:
-modal deploy fish_s2_pro_modal.py
+modal deploy tts/fish_s2_pro.py
 ```
 
 First cold start downloads the weights into the `huggingface-cache` Volume and can
@@ -56,7 +63,7 @@ URL like `https://<workspace>--fish-s2-pro-tts-serve.modal.run`.
 Health check:
 
 ```bash
-modal run fish_s2_pro_modal.py
+modal run tts/fish_s2_pro.py
 ```
 
 ## 3. Run the client
@@ -90,25 +97,25 @@ Two ways to give S2 Pro a voice:
   /v1/audio/voices/{name}` removes one.
 - **Inline cloning (Base mode)** — pass `ref_audio` + `ref_text` on each request.
 
-`bench_tts.py` is a quick latency/throughput benchmark; it registers one voice up
+`bench.py` is a quick latency/throughput benchmark; it registers one voice up
 front and then synthesizes by name (set `REF_AUDIO`/`REF_TEXT` as above).
 
 ## Alternatives under evaluation
 
 Two candidate models for a kid-facing, Australian-English conversation experience, served
 the same way (OpenAI-compatible `/v1/audio/speech`). Both verified end-to-end on Modal.
-See [`docs/tts-options-research.md`](docs/tts-options-research.md) for why these two.
+See [`docs/tts-options.md`](docs/tts-options.md) for why these two.
 
 `client.py` targets any endpoint via `TTS_MODEL`:
 
 ```bash
 # OmniVoice — Australian-accent kid voice via DESIGN (no reference clip needed):
-modal deploy omnivoice_modal.py
+modal deploy tts/omnivoice.py
 export TTS_URL="https://<workspace>--omnivoice-tts-serve.modal.run"
 TTS_MODEL=omnivoice python client.py            # -> omnivoice_design.wav
 
 # Qwen3-TTS — preset speaker (CustomVoice); AU via cloning needs the -Base variant:
-modal deploy qwen3_tts_modal.py
+modal deploy tts/qwen3.py
 export TTS_URL="https://<workspace>--qwen3-tts-serve.modal.run"
 TTS_MODEL=qwen-customvoice TTS_VOICE=vivian python client.py   # -> qwen_customvoice.wav
 ```
@@ -141,9 +148,9 @@ Two model-specific gotchas (documented in-file):
   audio to ~5–9s ([vllm-omni #2248](https://github.com/vllm-project/vllm-omni/issues/2248),
   now fixed); verified producing 30s+ of continuous audio here.
 - The two pip resolver `ERROR` lines during the image build (einx / pydantic /
-  protobuf) are **expected and benign** — see the comments in `fish_s2_pro_modal.py`.
+  protobuf) are **expected and benign** — see the comments in `tts/fish_s2_pro.py`.
 - If startup fails with Triton/attention errors, uncomment
-  `VLLM_OMNI_FISH_KVCACHE_ATTN: "0"` in `fish_s2_pro_modal.py` to disable the Fish
+  `VLLM_OMNI_FISH_KVCACHE_ATTN: "0"` in `tts/fish_s2_pro.py` to disable the Fish
   KV-cache attention fast path (installs cleanly on 0.22.x, so normally unneeded).
 - The app scales to zero after 15 min idle; uncomment `min_containers=1` in
-  `fish_s2_pro_modal.py` to keep one container always warm.
+  `tts/fish_s2_pro.py` to keep one container always warm.

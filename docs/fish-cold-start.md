@@ -2,10 +2,10 @@
 
 _Investigated 2026-06-14, on the **upgraded** stack: vLLM **0.22.1** + vllm-omni
 **0.22.0**, `H100:1`, Modal app `fish-s2-pro-tts`. This supersedes the 0.19.0-era
-numbers in [`../PERF_BASELINE.md`](../PERF_BASELINE.md) (which predates the upgrade
+numbers in [`./perf-baseline.md`](./perf-baseline.md) (which predates the upgrade
 and the `voice:"default"` removal). One of several models in this repo — see
-`fish_s2_pro_modal.py`; siblings being tested: `qwen3_tts_modal.py`,
-`omnivoice_modal.py`._
+`tts/fish_s2_pro.py`; siblings being tested: `tts/qwen3.py`,
+`tts/omnivoice.py`._
 
 ## TL;DR
 
@@ -55,7 +55,7 @@ scheduling/image-pull variance, not recompilation.
 
 vLLM profiles and sizes the KV cache for **16,384 tokens** (reserving 47.5 GiB /
 345k tokens — far more than TTS needs: a long paragraph is ~1–2k tokens). Lowering
-`--max-model-len` to e.g. **4096** in `fish_s2_pro_modal.py`'s `vllm serve` args
+`--max-model-len` to e.g. **4096** in `tts/fish_s2_pro.py`'s `vllm serve` args
 should trim the ~66 s profiling phase and free GPU memory. Cost is one cold start to
 measure; helps on **either** GPU. **Not yet tried.**
 
@@ -89,7 +89,7 @@ RTF ≈ 2.0); the **warm 3.9 s** is the true short-clip number.
 
 ## Pointers
 
-- App / serving: [`../fish_s2_pro_modal.py`](../fish_s2_pro_modal.py)
-- Client + benchmark: [`../client.py`](../client.py), [`../bench_tts.py`](../bench_tts.py)
-- Older (0.19.0) baseline: [`../PERF_BASELINE.md`](../PERF_BASELINE.md)
-- Model-selection research: [`./tts-options-research.md`](./tts-options-research.md)
+- App / serving: [`../tts/fish_s2_pro.py`](../tts/fish_s2_pro.py)
+- Client + benchmark: [`../client.py`](../client.py), [`../bench.py`](../bench.py)
+- Older (0.19.0) baseline: [`./perf-baseline.md`](./perf-baseline.md)
+- Model-selection research: [`./tts-options.md`](./tts-options.md)

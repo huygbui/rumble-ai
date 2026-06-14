@@ -15,7 +15,7 @@ a researcher and verifier disagreed, the verifier's reading is used here.
 Current baseline already in this repo: **Fish Speech S2 Pro** (`fishaudio/s2-pro`) — a
 zero-shot voice-cloning **TTS** model (~49 GB GPU peak) served on Modal via vLLM-Omni,
 under the Fish Audio Research License (research/non-commercial free; commercial via
-`business@fish.audio`). See `fish_s2_pro_modal.py` / `README.md`.
+`business@fish.audio`). See `tts/fish_s2_pro.py` / `README.md`.
 
 ---
 
@@ -53,11 +53,11 @@ under the Fish Audio Research License (research/non-commercial free; commercial 
 **Spin up OmniVoice first, run Qwen3-TTS-1.7B alongside it as a de-risked hedge, and
 treat PersonaPlex-7B as a separate, time-boxed S2S spike** (to learn the conversational
 ceiling, not as a baseline replacement). Scaffolds for the first two are in
-`omnivoice_modal.py` and `qwen3_tts_modal.py`, modeled on `fish_s2_pro_modal.py`.
+`tts/omnivoice.py` and `tts/qwen3.py`, modeled on `tts/fish_s2_pro.py`.
 
 Concretely:
 1. Stand both TTS models up on the existing vLLM-Omni / OpenAI-compatible path; benchmark
-   cold-start, RTF, and concurrency against Fish (`bench_tts.py` is a starting point).
+   cold-start, RTF, and concurrency against Fish (`bench.py` is a starting point).
 2. Run a **blind AU listening test** — OmniVoice's `instructions="…australian accent…"`
    attribute *and* a consented-AU voice clone, for both models, judged by AU listeners.
 3. Probe **OOD-text robustness** (gibberish, code-switching, very long, adversarial
@@ -89,7 +89,7 @@ Concretely:
   conditioned and unverified; the clean online voice-design/cloning request adapter
   (`instructions` / `ref_audio` mapping) landed 2026-06-13 in vLLM-Omni **v0.23.0rc1** /
   `main` — basic online TTS works on the proven v0.22.x stack, but for the full
-  voice-design path you bump the version (see `omnivoice_modal.py` header).
+  voice-design path you bump the version (see `tts/omnivoice.py` header).
 - **Sources:** `huggingface.co/k2-fsa/OmniVoice`, `github.com/k2-fsa/OmniVoice`
   (`docs/voice-design.md`), `github.com/vllm-project/vllm-omni`
   (`docs/serving/speech_api.md`, `docs/models/supported_models.md`,
