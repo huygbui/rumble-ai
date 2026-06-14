@@ -89,7 +89,7 @@ app = modal.App("omnivoice-tts")
         "/root/.cache/huggingface": hf_cache_vol,
         "/root/.cache/vllm": vllm_cache_vol,
     },
-    scaledown_window=5 * MINUTES,  # stay warm 5 min after last request (cost-saving)
+    scaledown_window=2 * MINUTES,  # stay warm 2 min after last request (cost-saving; chat keepalive holds it open)
     timeout=20 * MINUTES,
     # min_containers=1,  # uncomment for always-warm (no cold-start latency, costs $)
 )

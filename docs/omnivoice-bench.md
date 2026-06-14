@@ -26,10 +26,14 @@ the median of 3.
 | Warm — short (~7 w, 2.2 s audio) | **2.66 s** (RTF 1.21) | 3.93 s | OmniVoice faster despite the weaker card (tiny model) |
 | Warm — medium (~28 w, 9.6 s audio) | 4.77 s (**RTF 0.50**) | RTF 0.40–0.55 | comparable; ~2× faster than real-time |
 | Warm — long (~84 w, 28.8 s audio) | 11.0 s (**RTF 0.38**) | RTF ~0.53 | comparable; **no truncation** at ~29 s |
-| **Streaming TTFA** | **3.22 s** | **1.16 s** | ⚠ OmniVoice's weak spot (see below) |
+| **"Streaming" TTFA**² | **3.22 s** | **1.16 s** | ⚠ OmniVoice's weak spot (see below) |
 | 8 concurrent (1 container) | wall 9.48 s · **0.84 req/s** | wall 5.17 s · 1.55 req/s¹ | both batch ~5×; Fish higher abs. throughput on pricier HW |
 
 ¹ Fish concurrency is the 0.19.0-era baseline (not re-measured on the current stack).
+
+² OmniVoice's 3.22 s is **buffered (non-streaming) full-synth, not real streaming** — NAR
+diffusion fixes output length up front and emits no early tokens (see the correction note
+below). Fish's 1.16 s is genuine streaming TTFA.
 
 **Takeaways.** OmniVoice matches or beats Fish on cold start and warm single-stream
 latency at a fraction of the GPU cost. The one real regression is **streaming
@@ -37,6 +41,16 @@ time-to-first-audio (~3.2 s vs Fish's ~1.2 s)** — and streaming barely helps (
 vs 4.77 s full), so the two-stage eager codec seems to emit audio late. For a
 back-and-forth kid chat, **TTFA is the metric to watch** — it's what makes a reply feel
 instant.
+
+> **Correction (2026-06-14, post multi-agent review):** OmniVoice is a *single-stage,
+> non-autoregressive masked-diffusion* model — it unmasks the whole acoustic-token grid over
+> ~32 diffusion steps, then runs one DAC codec decode. That 32-step loop is **already
+> CUDA-graphed by default, independent of `enforce_eager`**. Consequences: (a) bf16 gave no
+> win because the loop is graph-bound, not FLOP-bound; (b) true server-side streaming is
+> **architecturally impossible** (NAR diffusion fixes output length up front and has no 'early'
+> tokens) — so the '3.22 s streaming TTFA' below was actually *buffered full synth*; client-side
+> clause chunking (say.py) is the only TTFA lever; (c) the real server-side latency lever is the
+> diffusion **`num_step`** (32->24/16, a quality tradeoff), not precision or eager-mode.
 
 ## 2. Quality (A/B)
 
@@ -67,21 +81,27 @@ still needs ears):
 - **Weights cache works.** ~64 s cold start is consistent with weights loading from the
   `huggingface-cache` volume — a fresh ~3.25 GB download (2.45 GB model + 0.8 GB codec)
   would inflate it noticeably. No re-download per cold start.
-- **No compile cache — by design.** OmniVoice's model-type deploy config forces
-  `float32` + `enforce_eager`, so there's no torch.compile / CUDA-graph step (unlike Fish,
-  which reloads compiled graphs in ~1.8 s). Upside: zero compile-cache fragility. Downside:
-  it forgoes CUDA-graph speedups.
+- **No torch.compile cache — but the diffusion loop is still CUDA-graphed.** OmniVoice's
+  model-type deploy config forces `float32` + `enforce_eager` (the latter only governs vLLM's
+  unused AR engine), yet its 32-step diffusion loop is **already CUDA-graphed by default**
+  (independent of `enforce_eager`) — so there is no extra graph speedup to unlock, and no
+  torch.compile cache to reload (unlike Fish's ~1.8 s). See the §1 correction.
 - **Scale-to-zero works** (5-min window); the follow-up run hit a still-warm container.
 
-**Levers for more performance (untested, quality-risk):**
-1. **`float32` → `bf16`** is the biggest one — could roughly halve warm latency and ~2× the
-   concurrency, *if* OmniVoice/codec are validated in bf16. The deploy config pins fp32 and
-   says don't override, so this needs a careful quality check, not a blind flip.
-2. **Disable `enforce_eager`** for CUDA graphs — constrained by the custom modeling code;
-   may not be safe.
-3. **Streaming TTFA** is the highest-value fix for conversational use — check whether
-   vllm-omni's OmniVoice path can emit earlier chunks; otherwise keep utterances short.
-4. A10G is a sensible cost tier; L40S would be faster, L4 cheaper.
+**Levers for more performance (status updated post-review):**
+1. ~~**`float32` → `bf16`**~~ **TESTED — NO WIN** (see Tuning experiments below): bf16 was
+   marginally *slower* with no concurrency gain, because the loop is graph-bound not
+   FLOP-bound, and the DAC codec is hard-coded fp32. Kept fp32.
+2. **Disable `enforce_eager`** for CUDA graphs — **DEAD — the diffusion loop is already
+   CUDA-graphed (independent of `enforce_eager`)**; there is no graph speedup left to unlock.
+3. **Streaming TTFA** — **RESOLVED — NO: OmniVoice cannot stream (NAR diffusion); keep
+   client-side chunking** (see `say.py`). The model fixes output length up front and emits no
+   early tokens, so there are no earlier chunks for vllm-omni to surface.
+4. **`num_step` (32->24->16)** is the real server-side latency lever — fewer diffusion steps
+   directly shorten the loop, at a quality tradeoff. Caveat: vllm-omni's `--hf-overrides` may
+   silently no-op for OmniVoice (the pipeline reads `config.json` from disk), so verify it took
+   effect or bake `config.json` on the cache volume.
+5. A10G is a sensible cost tier; L40S would be faster, L4 cheaper.
 
 ## Verdict
 
@@ -90,7 +110,9 @@ at ~10× lower GPU cost, clean audio, and (uniquely) a native AU-accent + child 
 control. Open items before committing:
 1. **Listen to the A/B** (`out/*` vs `out/omnivoice_*`), ideally with an AU listener — does
    the designed voice sound good and Australian?
-2. **Decide if ~3.2 s streaming TTFA is acceptable** for the chat UX, or needs work.
+2. **Felt latency = client-chunked TTFA (~2.2 s), not server streaming** (which OmniVoice can't
+   do — see §1); decide if ~2.2 s is acceptable for the chat UX, or pursue `num_step` / GPU-tier
+   / LLM-overlap (see §3).
 3. Consider testing **zero-shot cloning** of a consented AU clip — likely a more consistent
    AU voice than the design attribute, and an easy add (`REF_AUDIO`+`REF_TEXT`).
 
@@ -113,14 +135,13 @@ validated fp32 default:
 | 8-concurrent | 0.84 req/s | 0.83 req/s |
 | Audio (clip% / artifacts) | clean | clean (clip 04 slightly lower energy) |
 
-bf16 was **marginally slower** with **no concurrency gain**. Why: OmniVoice runs
-`enforce_eager` (no CUDA graphs) on a tiny 613M model, so latency is **overhead-bound — the
-~2.5 s per-request 2-stage/codec orchestration — not compute-bound**. Lowering matmul
-precision can't speed up an overhead-dominated workload, and it adds quality risk. **Kept
-fp32.** The only remaining raw-perf avenue is CUDA graphs (disabling `enforce_eager`), which
-the model's deploy config forces off — not pursued. To retry: re-add `--dtype` to
-`tts/omnivoice.py`'s serve cmd and `modal deploy` (the experiment lever was reverted to keep
-the serving file clean).
+bf16 was **marginally slower** with **no concurrency gain**. Why (corrected mechanism, see §1):
+OmniVoice's 32-step masked-diffusion loop is **already CUDA-graphed**, so it is **graph-bound,
+not FLOP-bound** — lowering matmul precision can't speed up a pre-captured graph, and it adds
+quality risk (the DAC codec is hard-coded fp32 anyway). **Kept fp32.** The real server-side
+lever is **`num_step`** (32→24→16), not precision or eager-mode (disabling `enforce_eager` does
+nothing — the loop is graphed regardless). To retry dtype anyway: re-add `--dtype` to
+`tts/omnivoice.py`'s serve cmd and `modal deploy`.
 
 ### Client-side sentence chunking — ADOPTED (`say.py`)
 
