@@ -1,24 +1,26 @@
 # client.py
-# Call the deployed Fish Speech S2 Pro endpoint twice:
-#   (a) plain text-to-speech            -> tts.wav
-#   (b) voice cloning (ref_audio+ref_text) -> cloned.wav
+# Call the deployed Fish Speech S2 Pro endpoint.
 #
-# The cloning fields (ref_audio/ref_text/seed) are vLLM-Omni extensions not in the
-# typed OpenAI SDK, so we POST raw JSON to /v1/audio/speech with `requests`.
+# S2 Pro is a ZERO-SHOT voice model: it has NO built-in speakers, so every speech
+# request must supply a voice in ONE of two ways --
+#   (a) Registered voice  -> upload a reference clip once via POST /v1/audio/voices,
+#                            then synthesize with voice="<name>" (no per-request ref).
+#   (b) Inline cloning     -> pass ref_audio + ref_text on each request (Base mode).
+# The pre-0.22 `voice:"default"` shortcut was REMOVED upstream and now returns 400
+# ("Fish Speech has no built-in speakers").
 #
 #   export TTS_URL="https://<workspace>--fish-s2-pro-tts-serve.modal.run"
-#   python client.py
-#
-#   # voice cloning needs a reference clip + its exact transcript.
-#   # Against a REMOTE Modal endpoint, REF_AUDIO must be either:
-#   #   - a publicly reachable https:// URL, OR
-#   #   - a data:audio/wav;base64,... data URI, OR
-#   #   - a LOCAL file path: this client auto-encodes it into a data: URI before POST.
-#   # A bare local path forwarded verbatim only works if that path exists INSIDE the
-#   # serving container, which it does not for a remote deployment -- hence the
-#   # client-side encoding below.
+#   # A reference clip (10-30s) + its EXACT transcript are required for both paths:
 #   export REF_AUDIO="./reference.wav"   # local path, https:// URL, or data: URI
 #   export REF_TEXT="The exact transcript of the reference audio."
+#   python client.py
+#   # -> tts.wav     (path a: registered voice, if REF_AUDIO is a local file)
+#   # -> cloned.wav  (path b: inline ref_audio + ref_text)
+#
+# Against a REMOTE Modal endpoint, inline ref_audio must be reachable by the SERVER:
+# a public https:// URL, a data:audio/...;base64,... URI, or a local file (this
+# client auto-encodes a local path into a data: URI before POST). Voice REGISTRATION
+# uploads the bytes directly (multipart), so it needs a LOCAL file.
 
 import base64
 import mimetypes
@@ -28,6 +30,7 @@ import requests
 
 BASE_URL = os.environ["TTS_URL"].rstrip("/")  # printed by `modal deploy`
 SPEECH_URL = f"{BASE_URL}/v1/audio/speech"
+VOICES_URL = f"{BASE_URL}/v1/audio/voices"
 
 
 def synthesize(payload: dict, out_path: str) -> None:
@@ -56,13 +59,44 @@ def resolve_ref_audio(ref_audio: str) -> str:
     return ref_audio
 
 
+def register_voice(name: str, audio_path: str, ref_text: str) -> None:
+    # Upload a reusable voice via multipart POST /v1/audio/voices. Required fields:
+    # name, consent (free-text), plus the audio_sample bytes + its ref_text. After
+    # this, synthesize with voice=<name> and no per-request reference. Re-registering
+    # the same name overwrites it.
+    mime = mimetypes.guess_type(audio_path)[0] or "audio/wav"
+    with open(audio_path, "rb") as f:
+        resp = requests.post(
+            VOICES_URL,
+            data={
+                "name": name,
+                "consent": "I consent to using this reference voice for synthesis.",
+                "ref_text": ref_text,
+            },
+            files={"audio_sample": (os.path.basename(audio_path), f, mime)},
+            timeout=120,
+        )
+    resp.raise_for_status()
+    print(f"registered voice {name!r}: success={resp.json().get('success')}")
+
+
 def tts() -> None:
-    # Plain text-to-speech. seed -> deterministic voice (PR #2624); if the deployed
-    # build predates that PR, Pydantic silently drops the field. voice="default".
+    # Path (a): "plain" TTS via a pre-registered voice. Needs a LOCAL ref file to
+    # upload; for a remote-only ref (URL/data URI) use clone() instead. seed ->
+    # deterministic voice.
+    ref_audio = os.environ.get("REF_AUDIO")
+    ref_text = os.environ.get("REF_TEXT")
+    if not ref_audio or not ref_text:
+        print("skip tts: set REF_AUDIO + REF_TEXT (S2 Pro has no built-in voice)")
+        return
+    if not os.path.isfile(ref_audio):
+        print("skip tts: REF_AUDIO is not a local file; registration needs local bytes (clone() still runs)")
+        return
+    register_voice("myvoice", ref_audio, ref_text)
     synthesize(
         {
             "input": "Hello, this is Fish Speech S2 Pro running on Modal.",
-            "voice": "default",
+            "voice": "myvoice",
             "response_format": "wav",
             "seed": 58842,
         },
@@ -71,9 +105,8 @@ def tts() -> None:
 
 
 def clone() -> None:
-    # Voice cloning (Base mode): BOTH ref_audio AND ref_text are required for s2-pro.
-    # We omit task_type: every research cloning example passes only ref_audio +
-    # ref_text and lets Base mode be inferred.
+    # Path (b): inline voice cloning (Base mode). BOTH ref_audio AND ref_text are
+    # required. Works with a local path, https:// URL, or data: URI.
     ref_audio = os.environ.get("REF_AUDIO")
     ref_text = os.environ.get("REF_TEXT")
     if not ref_audio or not ref_text:
@@ -82,10 +115,10 @@ def clone() -> None:
     synthesize(
         {
             "input": "This sentence is spoken in the cloned reference voice.",
-            "voice": "default",
             "response_format": "wav",
-            "ref_audio": resolve_ref_audio(ref_audio),  # https URL or data: URI
+            "ref_audio": resolve_ref_audio(ref_audio),  # local path / https URL / data: URI
             "ref_text": ref_text,  # exact transcript of the reference clip
+            "seed": 58842,
         },
         "cloned.wav",
     )

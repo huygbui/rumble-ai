@@ -1,6 +1,12 @@
 # Quick perf benchmark for the Fish Speech S2 Pro Modal endpoint.
+#
+# S2 Pro has no built-in voice (the old voice:"default" now 400s), so the bench
+# registers one reusable voice up front and synthesizes by name. Set a reference:
+#   export REF_AUDIO=./reference.wav   # LOCAL file (registration uploads its bytes)
+#   export REF_TEXT="exact transcript of the reference clip"
 import concurrent.futures as cf
 import io
+import mimetypes
 import os
 import statistics
 import time
@@ -10,6 +16,27 @@ import requests
 
 BASE = os.environ["TTS_URL"].rstrip("/")
 URL = f"{BASE}/v1/audio/speech"
+VOICES_URL = f"{BASE}/v1/audio/voices"
+VOICE = "bench"  # registered below before any synthesis
+
+
+def register_bench_voice() -> None:
+    ref_audio = os.environ.get("REF_AUDIO")
+    ref_text = os.environ.get("REF_TEXT")
+    if not ref_audio or not os.path.isfile(ref_audio) or not ref_text:
+        raise SystemExit(
+            "bench needs a voice: set REF_AUDIO (a LOCAL wav) + REF_TEXT "
+            "(S2 Pro has no built-in voice; default was removed in vllm-omni 0.22.x)"
+        )
+    mime = mimetypes.guess_type(ref_audio)[0] or "audio/wav"
+    with open(ref_audio, "rb") as f:
+        r = requests.post(
+            VOICES_URL,
+            data={"name": VOICE, "consent": "I consent.", "ref_text": ref_text},
+            files={"audio_sample": (os.path.basename(ref_audio), f, mime)},
+            timeout=120,
+        )
+    r.raise_for_status()
 
 SHORT = "Hello, this is a short test sentence."
 MEDIUM = (
@@ -28,7 +55,7 @@ def wav_dur(b: bytes) -> float:
 
 
 def synth(text, stream=False, timeout=600):
-    payload = {"input": text, "voice": "default", "response_format": "wav", "seed": 58842}
+    payload = {"input": text, "voice": VOICE, "response_format": "wav", "seed": 58842}
     t0 = time.time()
     if stream:
         payload["stream"] = True
@@ -51,7 +78,8 @@ def line(label, total, audio, extra=""):
     print(f"{label:<22} latency={total:6.2f}s  audio={audio:5.2f}s  RTF={rtf:4.2f}  {extra}")
 
 
-print(f"Endpoint: {URL}\n")
+register_bench_voice()
+print(f"Endpoint: {URL}  (voice={VOICE!r})\n")
 
 # 1) Cold start (or warm if already up) — first request
 print("== 1. First request (includes cold start if scaled to zero) ==")

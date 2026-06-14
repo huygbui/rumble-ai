@@ -16,35 +16,36 @@ VLLM_PORT = 8091  # recipe uses 8091 for s2-pro
 N_GPU = 1  # ~48.9 GiB peak -> one 80GB card is enough
 MINUTES = 60  # seconds
 
-# Pin to the s2-pro recipe's exact tested combo: vLLM 0.19.0 + a SPECIFIC vllm-omni
-# commit. vllm-omni is NOT independent of vllm -- its setup.py manages the vllm
-# dependency dynamically, and PyPI's latest vllm-omni (0.22.0) pairs with vllm 0.23.0.
-# Mixing a hard vllm==0.19.0 pin with an unpinned `vllm-omni` from PyPI produces a
-# resolver conflict / mismatched install, so we pin both to the recipe's combo.
-VLLM_VERSION = "0.19.0"  # recipe-stated minimum + tested version for s2-pro
-VLLM_OMNI_COMMIT = "c93359bb354a6aa5c14d062430cb85b2c4db251e"  # recipe-pinned commit
+# Pin the vLLM / vllm-omni pair. vllm-omni is version-coupled to vllm: its releases
+# version-track the vLLM minor they rebase onto (e.g. vllm-omni 0.16.0 rebased onto
+# vLLM 0.16), so vllm-omni 0.22.0 pairs with the vLLM 0.22 line -- we use vllm 0.22.1
+# (latest 0.22.x stable). vllm-omni 0.22.0's PyPI metadata declares NO vllm
+# dependency, so installing vllm first is not silently overridden -- but we still
+# re-pin vllm explicitly in BOTH uv steps below so the resolver can never drift it.
+# This 0.22.x stack fixed the s2-pro long-form truncation bug (vllm-omni #2248) that
+# capped output at ~5-9s on the older 0.19.0 build; long-form output now works.
+VLLM_VERSION = "0.22.1"  # latest 0.22.x stable; pairs with vllm-omni 0.22.0
+VLLM_OMNI_VERSION = "0.22.0"  # latest stable PyPI release; "improved s2-pro path"
 
 # --- Container image -----------------------------------------------------------
-# CUDA 12.8 per recipe. Install order matters (mirrors the s2-pro recipe, which uses
-# `uv pip install` for vllm/vllm-omni and a plain `pip install fish-speech`):
-#   1. vllm pinned to 0.19.0. NOTE: we deliberately do NOT pass the recipe's
-#      `--torch-backend=auto`. That flag detects CUDA from the *build* host, but
-#      Modal's image builder has no GPU, so `auto` installs a CPU-only torch
-#      (torch==X+cpu, missing libtorch_cuda.so) that then fails to import on the GPU
-#      at runtime. Omitting it makes uv pull the default PyPI torch, which IS the
-#      CUDA build (this matches Modal's official vLLM example).
-#   2. vllm-omni from the recipe-pinned git commit (provides the --omni TTS stack
-#      and its own transformers); this pulls x-transformers>=2.12.2 -> einx>=0.3.0.
-#   3. fish-speech (DAC codec) installed SEPARATELY with permissive pip. It is NOT
-#      in the uv step above on purpose: fish-speech hard-pins einx==0.2.2, which is
-#      mutually exclusive with vllm-omni's einx>=0.3.0, so uv's strict resolver
-#      aborts if asked to satisfy both at once. pip (like the recipe's
-#      `pip install fish-speech`) just downgrades einx to 0.2.2 and warns that
-#      x-transformers wants newer einx -- the s2-pro DAC path needs 0.2.2.
-# NOTE: `vllm-omni` IS a real PyPI package, but the PyPI release version-matches a
-# newer vllm (latest -> vLLM 0.23.0). The risk is version pairing, not the package
-# name. If you want PyPI latest instead, install vllm==0.23.0 and then plain
-# `vllm-omni` -- keep the pair consistent (still without --torch-backend on Modal).
+# CUDA 12.8 base. The PyPI torch that vllm pulls bundles its own CUDA runtime libs,
+# so the base image mainly supplies the toolkit/driver surface; 12.8 is compatible
+# with the vllm 0.22.x default torch. If startup ever fails with a CUDA/torch ABI
+# error, bump this base tag to match torch's CUDA build.
+#
+# Install order matters -- the dependency tensions below are inherent to pairing
+# vllm-omni with fish-speech, independent of version:
+#   1. vllm pinned to 0.22.1. We deliberately do NOT pass `--torch-backend=auto`:
+#      that flag detects CUDA from the *build* host, but Modal's image builder has no
+#      GPU, so `auto` installs a CPU-only torch that fails to import on the GPU at
+#      runtime. Omitting it pulls the default PyPI (CUDA) torch.
+#   2. vllm-omni 0.22.0 from PyPI (provides the --omni TTS stack). We re-pin
+#      vllm==0.22.1 in this step too so uv cannot drift it while resolving
+#      vllm-omni's deps (x-transformers>=2.12.2 -> einx>=0.3.0, etc.).
+#   3. fish-speech (DAC codec) installed SEPARATELY with permissive pip. It is NOT in
+#      the uv steps: fish-speech hard-pins einx==0.2.2, mutually exclusive with
+#      vllm-omni's einx>=0.3.0, so uv's strict resolver would abort. pip just
+#      downgrades einx to 0.2.2 (what the s2-pro DAC path needs) and warns.
 image = (
     modal.Image.from_registry(
         "nvidia/cuda:12.8.1-devel-ubuntu22.04", add_python="3.12"
@@ -55,7 +56,8 @@ image = (
         f"vllm=={VLLM_VERSION}",
     )
     .uv_pip_install(
-        f"vllm-omni @ git+https://github.com/vllm-project/vllm-omni.git@{VLLM_OMNI_COMMIT}",
+        f"vllm-omni=={VLLM_OMNI_VERSION}",
+        f"vllm=={VLLM_VERSION}",  # re-pin so vllm-omni's resolve can't drift vllm
         "huggingface_hub[hf_transfer]",
     )
     # fish-speech pulls pyaudio, which builds a C extension -> needs a compiler.
@@ -64,23 +66,23 @@ image = (
     .apt_install("build-essential", "clang")
     # Permissive pip step (NOT uv): tolerates the einx==0.2.2 vs >=0.3.0 conflict.
     .pip_install("fish-speech")
-    # fish-speech's heavy dep tree (gradio/tensorboard/wandb/...) downgrades two
-    # libs that vllm needs newer, which would crash vllm at import:
-    #   - pydantic: fish-speech hard-pins ==2.9.2; vllm (and mcp/openai-harmony)
-    #     need >=2.12.0.
+    # fish-speech's heavy dep tree (gradio/tensorboard/wandb/...) downgrades two libs
+    # that vllm needs newer, which would crash vllm at import:
+    #   - pydantic: fish-speech hard-pins ==2.9.2; vllm needs >=2.12.0.
     #   - protobuf: pulled down to 3.19.6; vllm needs >=5.29.6 (protobuf 3 vs 5
     #     generated code is ABI-incompatible).
     # Restore both LAST. Safe: the serving path is vllm + the DAC codec
     # (descript-audio-codec), not fish-speech's pydantic schemas / protobuf users
     # (tensorboard/wandb/gradio webui), none of which run during TTS serving.
+    # (These two pip resolver "ERROR" lines at build time are expected and benign.)
     .pip_install("pydantic>=2.12.0", "protobuf>=5.29.6,<6")
     .env(
         {
             "HF_HUB_ENABLE_HF_TRANSFER": "1",
-            # Escape hatch: if startup fails with Triton/attention errors, set the
-            # Fish KV-cache attention fast path off by uncommenting the next line
-            # (documented in the s2-pro recipe). "=required" hard-fails if the path
-            # is unavailable; "=0" disables it.
+            # Escape hatch: if startup fails with Triton/attention errors, disable the
+            # Fish KV-cache attention fast path by uncommenting the next line.
+            # "=required" hard-fails if the path is unavailable; "=0" disables it.
+            # (On the 0.22.x stack the fast path installs cleanly, so this stays off.)
             # "VLLM_OMNI_FISH_KVCACHE_ATTN": "0",
         }
     )
@@ -103,23 +105,28 @@ app = modal.App("fish-s2-pro-tts")
         "/root/.cache/huggingface": hf_cache_vol,
         "/root/.cache/vllm": vllm_cache_vol,
     },
-    scaledown_window=15 * MINUTES,  # stay warm 15 min after last request
+    # Idle-cost control: after the last request the container stays warm for this
+    # long, then scales to ZERO -> no GPU cost while idle. 5 min trims the idle tail
+    # while still absorbing brief gaps between requests in a session. Cold start is
+    # ~150s (weights load from cache + model init; the first boot after a vllm bump
+    # also recompiles CUDA graphs once). Raise this if cold starts bite too often;
+    # lower it (1-2 min) to save more when usage is sparse.
+    scaledown_window=5 * MINUTES,
     timeout=20 * MINUTES,
-    # min_containers=1,  # uncomment for always-warm (no cold-start latency, costs $)
+    # min_containers=1,  # KEEP COMMENTED: always-warm = 24/7 GPU cost. Uncomment only
+    # if you need zero cold-start latency and accept paying continuously.
 )
 @modal.concurrent(max_inputs=8)  # vLLM batches; s2-pro is heavy so keep modest
 @modal.web_server(port=VLLM_PORT, startup_timeout=20 * MINUTES)
 def serve():
     # Non-blocking launch: Modal's web_server waits for the port, the function returns.
     # Recipe-exact single-GPU invocation: `vllm serve fishaudio/s2-pro --omni
-    # --host 0.0.0.0 --port 8091`. No --served-model-name (vLLM serves under the
-    # model id by default) and no --tensor-parallel-size (no-op for 1 GPU); add the
-    # latter only when N_GPU > 1.
+    # --host 0.0.0.0 --port 8091`. --omni is MANDATORY (enables the TTS stack).
     cmd = [
         "vllm",
         "serve",
         MODEL_NAME,
-        "--omni",  # MANDATORY: enables the vLLM-Omni TTS stack
+        "--omni",
         "--host",
         "0.0.0.0",
         "--port",
