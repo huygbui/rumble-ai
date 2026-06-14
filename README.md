@@ -26,6 +26,7 @@ client.py             # drive any /v1/audio/speech endpoint; per-model shape via
 bench.py              # latency / streaming / concurrency benchmark
 docs/
   tts-options.md      # ranked evaluation of TTS/S2S options for this use case
+  omnivoice-bench.md  # OmniVoice benchmark + head-to-head vs Fish
   perf-baseline.md    # Fish S2 Pro performance baseline
   fish-cold-start.md  # Fish S2 Pro cold-start investigation
 out/                  # generated audio: client.py runs + demo clips (gitignored; set

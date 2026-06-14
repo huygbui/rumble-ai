@@ -1,5 +1,8 @@
-Fish Speech S2 Pro - H100 quality samples
-GPU: H100 | vLLM 0.22.1 + vllm-omni 0.22.0
+Quality samples — A/B between TTS models (same texts; compare NN_*.wav vs omnivoice_NN_*.wav).
+See ../docs/omnivoice-bench.md for the full comparison.
+
+=== Fish Speech S2 Pro (baseline) — files: NN_*.wav ===
+GPU: H100 | vLLM 0.22.1 + vllm-omni 0.22.0 | 44.1 kHz
 voice: registered from tts.wav (ref_text: 'Hello, this is Fish Speech S2 Pro running on Modal.')
 
 01_short_greeting.wav
@@ -20,3 +23,11 @@ voice: registered from tts.wav (ref_text: 'Hello, this is Fish Speech S2 Pro run
 06_inline_clone.wav
   (same text as 01, via inline ref_audio+ref_text instead of the registered voice -- compare voice match/quality)
   Hello! Welcome to the Fish Speech S2 Pro demo. How are you doing today?
+
+=== OmniVoice (candidate) — files: omnivoice_NN_*.wav ===
+GPU: A10G | vLLM 0.23.0 + vllm-omni 0.23.0rc1 | 24 kHz
+voice: DESIGN (no reference clip) -- instructions='child, australian accent, high pitch'
+clips 01-05 use the EXACT same texts as the Fish clips above (1:1 A/B). No 06 (omnivoice
+voice-design has no registered-vs-clone split). 04 keeps Fish-style tags [laughing]/
+[whispering]/[angry]; omnivoice's native non-verbal is [laughter], so 04 also tests how it
+handles unfamiliar tags. AU-accent fidelity is UNVERIFIED -- judge by ear (ideally an AU listener).
