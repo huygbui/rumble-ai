@@ -32,6 +32,7 @@ MODEL = os.environ.get("TTS_MODEL", "fish").lower()
 OUT_DIR = os.environ.get("TTS_OUT_DIR", "out")
 RUN_PERF = os.environ.get("BENCH_PERF", "1") not in ("", "0")
 RUN_QUALITY = os.environ.get("BENCH_QUALITY") not in (None, "", "0")
+TAG = os.environ.get("BENCH_TAG", MODEL)  # filename prefix for quality clips (A/B variants)
 
 FISH_VOICE = "bench"  # registered below before any synthesis (fish only)
 # Fixed voice-design prompt so every omnivoice request uses the SAME voice (the
@@ -204,10 +205,10 @@ def run_quality() -> None:
     os.makedirs(OUT_DIR, exist_ok=True)
     for name, text in SAMPLE_TEXTS:
         _, _, b = synth(text)
-        path = os.path.join(OUT_DIR, f"{MODEL}_{name}.wav")
+        path = os.path.join(OUT_DIR, f"{TAG}_{name}.wav")
         with open(path, "wb") as f:
             f.write(b)
-        print(f"  {MODEL}_{name}.wav  {audio_stats(b)}")
+        print(f"  {TAG}_{name}.wav  {audio_stats(b)}")
 
 
 setup()

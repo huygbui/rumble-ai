@@ -23,6 +23,7 @@ tts/                  # TTS component — one Modal app per candidate model
 stt/                  # (next) speech-to-text candidates — one Modal app per model
 llm/                  # (next) dialogue-LLM candidates — one Modal app per model
 client.py             # drive any /v1/audio/speech endpoint; per-model shape via TTS_MODEL
+say.py                # low-latency "say this": pipelines clause synth -> fast first audio
 bench.py              # latency / streaming / concurrency benchmark
 docs/
   tts-options.md      # ranked evaluation of TTS/S2S options for this use case

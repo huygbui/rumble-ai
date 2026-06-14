@@ -94,6 +94,51 @@ control. Open items before committing:
 3. Consider testing **zero-shot cloning** of a consented AU clip — likely a more consistent
    AU voice than the design attribute, and an easy add (`REF_AUDIO`+`REF_TEXT`).
 
+## Tuning experiments (2026-06-14)
+
+Two levers from §3 were tried live on the A10G endpoint.
+
+### bf16 instead of fp32 — NO WIN, kept fp32
+
+A/B of a `--dtype bfloat16` variant (a separate `omnivoice-tts-bfloat16` app) vs the
+validated fp32 default:
+
+| | fp32 (default) | bf16 (experiment) |
+|---|---|---|
+| Cold start | 63.7 s | 67.4 s |
+| Warm short | **2.66 s** | 2.84 s |
+| Warm medium | **4.77 s** | 5.39 s |
+| Warm long | **11.0 s** | 11.9 s |
+| Streaming TTFA | 3.22 s | 3.55 s |
+| 8-concurrent | 0.84 req/s | 0.83 req/s |
+| Audio (clip% / artifacts) | clean | clean (clip 04 slightly lower energy) |
+
+bf16 was **marginally slower** with **no concurrency gain**. Why: OmniVoice runs
+`enforce_eager` (no CUDA graphs) on a tiny 613M model, so latency is **overhead-bound — the
+~2.5 s per-request 2-stage/codec orchestration — not compute-bound**. Lowering matmul
+precision can't speed up an overhead-dominated workload, and it adds quality risk. **Kept
+fp32.** The only remaining raw-perf avenue is CUDA graphs (disabling `enforce_eager`), which
+the model's deploy config forces off — not pursued. To retry: re-add `--dtype` to
+`tts/omnivoice.py`'s serve cmd and `modal deploy` (the experiment lever was reverted to keep
+the serving file clean).
+
+### Client-side sentence chunking — ADOPTED (`say.py`)
+
+Server-side streaming barely helps here (TTFA ~3.2 s). `say.py` instead splits the reply
+into clauses and synthesizes them **pipelined** — first audio plays while the rest generate:
+
+| approach | TTFA (first audio) |
+|---|---|
+| single-shot (whole utterance) | 3.30 s — and grows with length (5.4 s medium, 11.9 s long) |
+| server streaming | 3.22 s |
+| **chunked (`say.py`)** | **2.21 s** — ≈ one short-clause synth; ~flat regardless of reply length |
+
+The win grows with reply length: chunked TTFA stays ~2.2 s while single-shot scales with
+text. The ~2.2 s floor is the per-request fixed overhead (can't go lower without true
+server streaming, which this model lacks). This is the responsiveness pattern for the
+eventual `chat.py` loop. Run: `echo "..." | TTS_URL=… TTS_MODEL=omnivoice python say.py`
+(`PLAY=1` to hear it, `COMPARE=1` to also time single-shot).
+
 ## Reproduce
 
 ```bash
