@@ -11,6 +11,7 @@
 #   export TTS_VOICE=vivian                                # preset speaker (qwen-customvoice)
 #   export REF_AUDIO=./reference.wav   # local path, https:// URL, or data: URI (cloning)
 #   export REF_TEXT="exact transcript of the reference clip"
+#   export TTS_OUT_DIR=out             # where generated .wav files are written (default: out/)
 #
 # Per-model voice handling differs:
 #   fish             -> NO built-in voice: registers a reusable voice from REF_AUDIO, then
@@ -43,6 +44,7 @@ TEXT = os.environ.get("TTS_TEXT", "G'day! Do you want to hear a quick story?")
 VOICE = os.environ.get("TTS_VOICE", "vivian")  # preset speaker for qwen-customvoice
 REF_AUDIO = os.environ.get("REF_AUDIO")
 REF_TEXT = os.environ.get("REF_TEXT")
+OUT_DIR = os.environ.get("TTS_OUT_DIR", "out")  # generated audio lands here (gitignored)
 
 
 def _wav_dur(b: bytes) -> str:
@@ -54,12 +56,14 @@ def _wav_dur(b: bytes) -> str:
         return "non-WAV body"
 
 
-def synthesize(label: str, payload: dict, out_path: str) -> None:
+def synthesize(label: str, payload: dict, out_name: str) -> None:
     resp = requests.post(SPEECH_URL, json=payload, timeout=600)
     if not resp.ok:
         # Surface the server's error body (these endpoints return JSON errors, e.g. a bad
         # preset voice or a missing ref) instead of an opaque status code.
         raise SystemExit(f"[{label}] {resp.status_code}: {resp.text[:500]}")
+    os.makedirs(OUT_DIR, exist_ok=True)  # created on demand; OUT_DIR defaults to ./out
+    out_path = os.path.join(OUT_DIR, out_name)
     with open(out_path, "wb") as f:
         f.write(resp.content)
     print(f"[{label}] wrote {out_path}  ({len(resp.content)} bytes, {_wav_dur(resp.content)})")
@@ -102,7 +106,7 @@ def _have_ref() -> bool:
 
 
 def build_jobs() -> list[tuple[str, dict, str]]:
-    # Returns a list of (label, payload, out_path). May raise SystemExit for models that
+    # Returns a list of (label, payload, out_name). May raise SystemExit for models that
     # cannot synthesize anything without a reference clip (fish, qwen-base).
     if MODEL == "omnivoice":
         # Voice design needs NO reference -> a true end-to-end test from scratch. Accent /

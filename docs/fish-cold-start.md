@@ -61,8 +61,8 @@ measure; helps on **either** GPU. **Not yet tried.**
 
 ## Current-stack H100 perf snapshot (2026-06-14)
 
-Quick perf/quality run (registered-voice path; audio saved to `../samples/`,
-gitignored, with `MANIFEST.txt`):
+Quick perf/quality run (registered-voice path; audio saved to `../out/`,
+gitignored, with the tracked `../out/MANIFEST.txt`):
 
 | Metric | Value |
 |---|---|

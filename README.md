@@ -28,7 +28,9 @@ docs/
   tts-options.md      # ranked evaluation of TTS/S2S options for this use case
   perf-baseline.md    # Fish S2 Pro performance baseline
   fish-cold-start.md  # Fish S2 Pro cold-start investigation
-samples/              # demo audio (MANIFEST.txt tracked; *.wav gitignored)
+out/                  # generated audio: client.py runs + demo clips (gitignored; set
+                      #   TTS_OUT_DIR). out/MANIFEST.txt (tracked) lists the demo clips
+
 ```
 
 Each pipeline stage is its own top-level folder holding one Modal app per candidate
@@ -85,8 +87,8 @@ export REF_AUDIO="./reference.wav"   # local path, https:// URL, or data: URI
 export REF_TEXT="The exact transcript of the reference audio."
 
 python client.py
-# -> tts.wav    (registers a reusable voice, then synthesizes by name; needs a LOCAL ref)
-# -> cloned.wav (inline ref_audio + ref_text; skipped if REF_AUDIO/REF_TEXT unset)
+# -> out/tts.wav    (registers a reusable voice, then synthesizes by name; needs a LOCAL ref)
+# -> out/cloned.wav (inline ref_audio + ref_text; skipped if REF_AUDIO/REF_TEXT unset)
 ```
 
 Two ways to give S2 Pro a voice:
@@ -112,12 +114,12 @@ See [`docs/tts-options.md`](docs/tts-options.md) for why these two.
 # OmniVoice — Australian-accent kid voice via DESIGN (no reference clip needed):
 modal deploy tts/omnivoice.py
 export TTS_URL="https://<workspace>--omnivoice-tts-serve.modal.run"
-TTS_MODEL=omnivoice python client.py            # -> omnivoice_design.wav
+TTS_MODEL=omnivoice python client.py            # -> out/omnivoice_design.wav
 
 # Qwen3-TTS — preset speaker (CustomVoice); AU via cloning needs the -Base variant:
 modal deploy tts/qwen3.py
 export TTS_URL="https://<workspace>--qwen3-tts-serve.modal.run"
-TTS_MODEL=qwen-customvoice TTS_VOICE=vivian python client.py   # -> qwen_customvoice.wav
+TTS_MODEL=qwen-customvoice TTS_VOICE=vivian python client.py   # -> out/qwen_customvoice.wav
 ```
 
 `TTS_MODEL` values: `fish | omnivoice | qwen-customvoice | qwen-base | qwen-voicedesign`.

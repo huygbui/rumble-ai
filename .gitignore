@@ -9,9 +9,11 @@ wheels/
 # Virtual environments
 .venv
 
-# Generated audio (client.py outputs)
+# Generated audio (client.py + demo clips both write to ./out)
 *.wav
 *.mp3
+out/*
+!out/MANIFEST.txt   # keep the demo-clip manifest tracked; the audio itself stays ignored
 
 # macOS
 .DS_Store
