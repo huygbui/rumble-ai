@@ -20,10 +20,6 @@ class AppSettings(BaseSettings):
     chat_system: str = DEFAULT_CHAT_SYSTEM
 
     tts_url: str = ""
-    tts_model: str = "omnivoice"
-    tts_out_dir: str = "out"
-    play: bool = False
-    compare: bool = False
     omni_instructions: str = "female, child, high pitch, australian accent"
     omni_seed: int = 58842
     clause_max_len: int = 140
@@ -38,16 +34,6 @@ class AppSettings(BaseSettings):
     @classmethod
     def _strip_url(cls, value: str | None) -> str:
         return (value or "").rstrip("/")
-
-    @field_validator("tts_model")
-    @classmethod
-    def _normalize_tts_model(cls, value: str) -> str:
-        return value.lower()
-
-    @field_validator("play", "compare", mode="before")
-    @classmethod
-    def _blank_flag_is_false(cls, value: object) -> object:
-        return False if value in (None, "") else value
 
     @property
     def llm_chat_url(self) -> str:

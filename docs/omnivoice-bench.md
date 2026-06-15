@@ -30,8 +30,8 @@ non-autoregressive masked-diffusion model. It unmasks the whole acoustic-token g
 ~32 diffusion steps, then runs one DAC codec decode. Consequences:
 
 1. bf16 gave no win because the loop is graph-bound, not FLOP-bound.
-2. True server-side streaming is architecturally unavailable; client-side clause chunking
-   (`app.cli.say`) is the TTFA lever.
+2. True server-side streaming is architecturally unavailable; app-side clause chunking is
+   the TTFA lever.
 3. The real server-side latency knob is the diffusion `num_step` value (32 -> 24 -> 16),
    with a quality tradeoff.
 
@@ -104,22 +104,20 @@ validated fp32 default:
 bf16 was marginally slower with no concurrency gain. The DAC codec is hard-coded fp32
 anyway, so this stays fp32.
 
-### Client-side sentence chunking — adopted (`app.cli.say`)
+### App-side sentence chunking — adopted
 
-Server-side streaming barely helps here. `app.cli.say` instead splits the reply into
-clauses and synthesizes them pipelined: first audio plays while the rest generate.
+Server-side streaming barely helps here. The app splits replies into clauses and
+synthesizes them pipelined: first audio plays while the rest generate.
 
 | approach | TTFA (first audio) |
 |---|---:|
 | single-shot (whole utterance) | 3.30 s and grows with length |
 | server streaming | 3.22 s |
-| **chunked (`app.cli.say`)** | **2.21 s**, roughly flat regardless of reply length |
+| **chunked app pipeline** | **2.21 s**, roughly flat regardless of reply length |
 
 Run:
 
 ```bash
 export TTS_URL="https://huygbui--omnivoice-tts-serve.modal.run"
 TTS_MODEL=omnivoice BENCH_QUALITY=1 uv run python bench.py
-
-echo "..." | TTS_MODEL=omnivoice python -m app.cli.say
 ```

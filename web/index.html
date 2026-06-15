@@ -106,7 +106,7 @@ async function readSSE(res, onEvent) {
     }
   }
 }
-const GAP = 0.09;                       // ~SAY_GAP_MS: one short pause between clauses
+const GAP = 0.09;                       // short pause between clauses
 let ttsOn = true, sttOn = false, history = [], busy = false;
 let audioCtx = null, playhead = 0;      // Web Audio cursor -> gapless in-order playback
 let ready = false, STAGES = [];         // STAGES = configured stages; ready = all of them warm
@@ -117,7 +117,7 @@ fetch("/api/meta").then(r => r.json()).then(m => {
   $("meta").innerHTML =
     (m.stt_on ? `STT <b>${m.stt_model}</b>` : "STT <b>off</b>") + " · " +
     `LLM <b>${m.model}</b>${m.llm ? "" : " (unset)"} · ` +
-    (m.tts_on ? `TTS <b>${m.tts_model}</b>` : "TTS <b>off</b>");
+    (m.tts_on ? "TTS <b>on</b>" : "TTS <b>off</b>");
   const on = { stt: sttOn, llm: !!m.llm, tts: ttsOn };       // hide dots for stages that are off
   ["stt", "llm", "tts"].forEach(n => { if (!on[n]) $("d-" + n).style.display = "none"; });
   STAGES = ["stt", "llm", "tts"].filter(n => on[n]);

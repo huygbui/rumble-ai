@@ -14,7 +14,6 @@ class MetaResponse(BaseModel):
     llm: str | None
     model: str
     tts: str | None
-    tts_model: str
     tts_on: bool
     stt: str | None
     stt_model: str

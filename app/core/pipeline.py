@@ -1,13 +1,16 @@
 import asyncio
 import base64
+import io
+import json
 import time
+import wave
 from collections.abc import AsyncIterator
 from contextlib import suppress
 from dataclasses import dataclass
 
 import httpx
 
-from app.core import clauses, llm, tts
+from app.core import clauses
 from app.core.config import settings
 
 STT_EXT = {
@@ -34,7 +37,6 @@ def meta_payload() -> dict[str, object]:
         "llm": settings.llm_url or None,
         "model": settings.llm_model,
         "tts": settings.tts_url or None,
-        "tts_model": settings.tts_model,
         "tts_on": settings.tts_on,
         "stt": settings.stt_url or None,
         "stt_model": settings.stt_model,
@@ -51,10 +53,33 @@ async def run_turn(client: httpx.AsyncClient, messages: list[dict]) -> AsyncIter
         ttft_sent = False
 
         try:
-            async with client.stream("POST", settings.llm_chat_url, json=llm.make_chat_payload(messages)) as r:
+            async with client.stream(
+                "POST",
+                settings.llm_chat_url,
+                json={
+                    "model": settings.llm_model,
+                    "messages": messages,
+                    "temperature": 0.7,
+                    "top_p": 0.8,
+                    "top_k": 20,
+                    "presence_penalty": 1.5,
+                    "max_tokens": settings.chat_max_tokens,
+                    "chat_template_kwargs": {"enable_thinking": False},
+                    "stream": True,
+                },
+            ) as r:
                 r.raise_for_status()
                 async for line in r.aiter_lines():
-                    if not (delta := llm.parse_sse_delta(line)):
+                    if not line.startswith("data:"):
+                        continue
+                    data = line[5:].strip()
+                    if data == "[DONE]":
+                        continue
+                    try:
+                        delta = json.loads(data)["choices"][0].get("delta", {}).get("content") or None
+                    except (json.JSONDecodeError, KeyError, IndexError):
+                        continue
+                    if not delta:
                         continue
                     if not ttft_sent and delta.strip():
                         ttft_sent = True
@@ -99,7 +124,11 @@ async def _emit_turn(
                 yield Event("error", {"message": f"{type(e).__name__}: {e}"})
                 i += 1
                 continue
-            dur = tts.wav_duration(wav)
+            try:
+                with wave.open(io.BytesIO(wav)) as audio_file:
+                    dur = audio_file.getnframes() / audio_file.getframerate()
+            except (EOFError, wave.Error, ZeroDivisionError):
+                dur = 0.0
             total_audio += dur
             payload |= {
                 "synth_s": synth_s,
@@ -121,7 +150,16 @@ async def _emit_turn(
 
 async def synthesize_clause(client: httpx.AsyncClient, text: str) -> tuple[float, bytes]:
     t0 = time.time()
-    r = await client.post(settings.tts_speech_url, json=tts.make_speech_payload(text))
+    r = await client.post(
+        settings.tts_speech_url,
+        json={
+            "input": text,
+            "instructions": settings.omni_instructions,
+            "language": "English",
+            "response_format": "wav",
+            "seed": settings.omni_seed,
+        },
+    )
     r.raise_for_status()
     return time.time() - t0, r.content
 

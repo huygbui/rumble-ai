@@ -82,8 +82,8 @@ Open the printed local URL, warm the services, then chat by typing or using the 
 
 ## Lab Tools
 
-`client.py`, `bench.py`, and `app/cli/say.py` are kept for model checks and one-off
-benchmarks. They are not the production app path.
+`client.py` and `bench.py` are kept for model checks and one-off benchmarks. They are not
+the production app path.
 
 ### TTS client
 
@@ -99,25 +99,6 @@ TTS_MODEL=qwen-customvoice TTS_VOICE=vivian python client.py
 For voice **cloning** (`qwen-base`, or optional on OmniVoice), set `REF_AUDIO` +
 `REF_TEXT` to a consented reference clip. `REF_AUDIO` may be a public URL, a data URI, or
 a local path that `client.py` auto-encodes into a data URI before posting.
-
-### Chunked speech CLI
-
-`app.cli.say` is the app-facing TTS path. It splits text into short clauses, synthesizes
-them in a producer thread, and stitches the clips so the first audio is ready sooner than a
-single long request.
-
-```bash
-echo "G'day! Want to hear a quick story? It begins on a windy hill by the sea." \
-  | TTS_MODEL=omnivoice python -m app.cli.say
-```
-
-Useful flags:
-
-```bash
-PLAY=1      # play each generated clause with afplay
-COMPARE=1   # also run a single-shot request for timing comparison
-STITCH_ONLY=1 python -m app.cli.say
-```
 
 ### Benchmark
 
