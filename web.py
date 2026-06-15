@@ -18,7 +18,6 @@ import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import ClassVar, Literal
 
 import httpx
 from fastapi import FastAPI, Request
@@ -27,7 +26,7 @@ from fastapi.sse import EventSourceResponse, ServerSentEvent
 from pydantic import BaseModel
 
 import chat  # ClauseStreamer, llm_payload/parse_sse_delta, LLM_BASE/LLM_CHAT_URL/LLM_MODEL
-import say   # make_payload, wav_dur, stitch, URL/BASE/MODEL/OUT_DIR
+import say  # make_payload, wav_dur, stitch, URL/BASE/MODEL/OUT_DIR
 
 INDEX = Path(__file__).parent / "web" / "index.html"
 
@@ -39,15 +38,14 @@ TTS_ON = bool(say.BASE)
 STT_ON = bool(STT_BASE)
 
 # Browser MediaRecorder hands us webm/ogg/mp4; vLLM[audio] decodes via soundfile + PyAV.
-STT_EXT = {"audio/webm": "webm", "audio/ogg": "ogg", "audio/mp4": "m4a",
-           "audio/mpeg": "mp3", "audio/wav": "wav", "audio/x-wav": "wav"}
+STT_EXT = {"audio/webm": "webm", "audio/ogg": "ogg", "audio/mp4": "m4a", "audio/mpeg": "mp3", "audio/wav": "wav", "audio/x-wav": "wav"}
 
-# --- API schema (Pydantic) ------------------------------------------------------------
-# One source of truth for every wire shape the browser sees: the POST body it sends, the JSON
-# the meta/stt endpoints return, and each SSE frame streamed during a turn or warm-up. Each
-# Event subclass owns its SSE `event:` name and renders itself as a native fastapi.sse
-# ServerSentEvent, so the streaming endpoints just yield typed objects -- no dict literals,
-# stringly-typed names, or hand-rolled wire framing.
+
+# --- Request validation (Pydantic) ----------------------------------------------------
+# Pydantic earns its keep on the one untrusted input -- the chat POST body -- where it turns a
+# malformed payload into an automatic 422. Everything we *emit* (SSE frames, /api/meta,
+# /api/stt) is data we control, so it stays plain: ServerSentEvent(event=..., data={...}) and
+# dicts. What you write is what goes on the wire.
 class Message(BaseModel):
     role: str
     content: str
@@ -57,84 +55,13 @@ class ChatRequest(BaseModel):
     messages: list[Message]
 
 
-class MetaResponse(BaseModel):
-    llm: str | None
-    model: str
-    tts: str | None
-    tts_model: str
-    tts_on: bool
-    stt: str | None
-    stt_model: str
-    stt_on: bool
-
-
-class SttResponse(BaseModel):  # one of these is set; the route drops the null one (exclude_none)
-    text: str | None = None
-    error: str | None = None
-
-
-class Event(BaseModel):
-    """Base for an SSE frame: a subclass sets `event` (the SSE event name) + its data fields.
-    .to_sse() wraps it as a native ServerSentEvent -- FastAPI does the wire framing, keep-alive
-    pings, and disconnect handling, so the streaming endpoints just yield these."""
-    event: ClassVar[str]
-
-    def to_sse(self) -> ServerSentEvent:
-        return ServerSentEvent(data=self, event=self.event)
-
-
-class Ttft(Event):       # first token landed -- the felt-latency clock
-    event = "ttft"
-    t: float
-
-
-class Clause(Event):     # one ready clause (synth_s/audio_s/wav_b64 set only in voice mode)
-    event = "clause"
-    i: int
-    text: str
-    t_ready: float
-    synth_s: float | None = None
-    audio_s: float | None = None
-    wav_b64: str | None = None
-
-
-class Done(Event):       # end of a turn
-    event = "done"
-    wall: float
-    total_audio: float
-    n: int
-    full_reply: str
-
-
-class Error(Event):      # transport/LLM/TTS failure, surfaced mid-stream
-    event = "error"
-    message: str
-
-
-class Warming(Event):    # warm-up began for these stages
-    event = "warming"
-    stages: list[str]
-
-
-class Stage(Event):      # one stage finished warming
-    event = "stage"
-    name: str
-    status: Literal["ready", "failed"]
-    t: float
-
-
-class WarmDone(Event):   # warm-up finished (shares the SSE name "done" with a turn's Done)
-    event = "done"
-    ready: bool
-
-
-# --- One conversational turn, as a stream of typed SSE Events --------------------------
+# --- One conversational turn, as a stream of SSE events --------------------------------
 # A producer task streams the LLM into a clause queue; this generator pulls clauses and (in
 # voice mode) synthesizes them. Synthesis runs while the producer keeps reading the LLM -- the
 # same overlap as chat.converse(), so first audio tracks the FIRST clause, not the whole reply.
-# The queue carries either an Event to pass straight through (Ttft/Error) or a raw clause
-# string the consumer enriches into a Clause once it's (optionally) synthesized.
-async def run_turn(client: httpx.AsyncClient, messages: list[dict]) -> AsyncIterator[Event]:
+# The queue carries either a ServerSentEvent to pass straight through (ttft/error) or a raw
+# clause string the consumer turns into a `clause` event once it's (optionally) synthesized.
+async def run_turn(client: httpx.AsyncClient, messages: list[dict]) -> AsyncIterator[ServerSentEvent]:
     clauses: asyncio.Queue = asyncio.Queue()
     t0 = time.time()
 
@@ -149,13 +76,13 @@ async def run_turn(client: httpx.AsyncClient, messages: list[dict]) -> AsyncIter
                         continue
                     if not ttft_sent and delta.strip():
                         ttft_sent = True
-                        await clauses.put(Ttft(t=time.time() - t0))
+                        await clauses.put(ServerSentEvent(event="ttft", data={"t": time.time() - t0}))
                     for clause in streamer.feed(delta):
                         await clauses.put(clause)
             for clause in streamer.flush():
                 await clauses.put(clause)
         except Exception as e:  # surface transport/LLM errors instead of hanging the stream
-            await clauses.put(Error(message=f"{type(e).__name__}: {e}"))
+            await clauses.put(ServerSentEvent(event="error", data={"message": f"{type(e).__name__}: {e}"}))
         await clauses.put(None)
 
     task = asyncio.create_task(produce())
@@ -168,38 +95,40 @@ async def run_turn(client: httpx.AsyncClient, messages: list[dict]) -> AsyncIter
 
 
 # Text-only (no TTS_URL): stream clauses as text, no audio -- dev without the GPU.
-async def _text_turn(clauses, t0) -> AsyncIterator[Event]:
+async def _text_turn(clauses, t0) -> AsyncIterator[ServerSentEvent]:
     parts: list[str] = []
     while (item := await clauses.get()) is not None:
-        if isinstance(item, Event):
+        if isinstance(item, ServerSentEvent):
             yield item  # ttft / error, straight through
             continue
         parts.append(item)
-        yield Clause(i=len(parts) - 1, text=item, t_ready=time.time() - t0)
-    yield Done(wall=time.time() - t0, total_audio=0.0, n=len(parts), full_reply=" ".join(parts))
+        yield ServerSentEvent(event="clause", data={"i": len(parts) - 1, "text": item, "t_ready": time.time() - t0})
+    yield ServerSentEvent(event="done", data={"wall": time.time() - t0, "total_audio": 0.0, "n": len(parts), "full_reply": " ".join(parts)})
 
 
 # Voice: synthesize each clause as it arrives and emit ready audio in order.
-async def _voice_turn(client, clauses, t0) -> AsyncIterator[Event]:
+async def _voice_turn(client, clauses, t0) -> AsyncIterator[ServerSentEvent]:
     parts, wavs, total_audio, i = [], [], 0.0, 0
     while (item := await clauses.get()) is not None:
-        if isinstance(item, Event):
+        if isinstance(item, ServerSentEvent):
             yield item  # ttft / error
             continue
         try:
             synth_s, wav = await synth(client, item)
         except Exception as e:
-            yield Error(message=f"{type(e).__name__}: {e}")
+            yield ServerSentEvent(event="error", data={"message": f"{type(e).__name__}: {e}"})
             continue
         dur = say.wav_dur(wav)
         total_audio += dur
         parts.append(item)
         wavs.append((i, wav))
-        yield Clause(i=i, text=item, t_ready=time.time() - t0, synth_s=synth_s,
-                     audio_s=dur, wav_b64=base64.b64encode(wav).decode())
+        yield ServerSentEvent(
+            event="clause",
+            data={"i": i, "text": item, "t_ready": time.time() - t0, "synth_s": synth_s, "audio_s": dur, "wav_b64": base64.b64encode(wav).decode()},
+        )
         i += 1
     await asyncio.to_thread(_save_stitched, wavs)
-    yield Done(wall=time.time() - t0, total_audio=total_audio, n=len(parts), full_reply=" ".join(parts))
+    yield ServerSentEvent(event="done", data={"wall": time.time() - t0, "total_audio": total_audio, "n": len(parts), "full_reply": " ".join(parts)})
 
 
 async def synth(client: httpx.AsyncClient, text: str) -> tuple[float, bytes]:
@@ -246,10 +175,10 @@ async def _health_ok(client: httpx.AsyncClient, base: str) -> bool:
         return False
 
 
-async def warm_stream(client: httpx.AsyncClient) -> AsyncIterator[Event]:
+async def warm_stream(client: httpx.AsyncClient) -> AsyncIterator[ServerSentEvent]:
     stages = _stages()
     if not stages:
-        yield WarmDone(ready=False)
+        yield ServerSentEvent(event="done", data={"ready": False})
         return
     t0 = time.time()
 
@@ -260,15 +189,15 @@ async def warm_stream(client: httpx.AsyncClient) -> AsyncIterator[Event]:
             await asyncio.sleep(2)  # cold start in progress -> re-probe, keep nudging
         return name, False, time.time() - t0
 
-    yield Warming(stages=[n for n, _ in stages])
+    yield ServerSentEvent(event="warming", data={"stages": [n for n, _ in stages]})
     tasks = [asyncio.create_task(warm_up(n, b)) for n, b in stages]
     all_ok = True
     for done in asyncio.as_completed(tasks):
         name, ok, t = await done
         all_ok &= ok
         print(f"  warm: {name} {'ready' if ok else 'FAILED'} in {t:.1f}s", flush=True)
-        yield Stage(name=name, status="ready" if ok else "failed", t=t)
-    yield WarmDone(ready=all_ok)
+        yield ServerSentEvent(event="stage", data={"name": name, "status": "ready" if ok else "failed", "t": t})
+    yield ServerSentEvent(event="done", data={"ready": all_ok})
 
 
 # Mic -> text. Forward the recorded audio to the OpenAI-compatible ASR endpoint as multipart.
@@ -312,16 +241,16 @@ def index():
 
 
 @app.get("/api/meta")
-def meta() -> MetaResponse:
-    return MetaResponse(llm=chat.LLM_BASE or None, model=chat.LLM_MODEL,
-                        tts=say.BASE or None, tts_model=say.MODEL, tts_on=TTS_ON,
-                        stt=STT_BASE or None, stt_model=STT_MODEL, stt_on=STT_ON)
+def meta() -> dict:
+    return {"llm": chat.LLM_BASE or None, "model": chat.LLM_MODEL,
+            "tts": say.BASE or None, "tts_model": say.MODEL, "tts_on": TTS_ON,
+            "stt": STT_BASE or None, "stt_model": STT_MODEL, "stt_on": STT_ON}
 
 
 @app.get("/api/warm", response_class=EventSourceResponse)
 async def warm(request: Request) -> AsyncIterator[ServerSentEvent]:
     async for ev in warm_stream(request.app.state.http):
-        yield ev.to_sse()
+        yield ev
 
 
 @app.post("/api/chat", response_class=EventSourceResponse)
@@ -329,31 +258,30 @@ async def post_chat(req: ChatRequest, request: Request) -> AsyncIterator[ServerS
     client = request.app.state.http
     messages = [m.model_dump() for m in req.messages]
     if not chat.LLM_BASE:
-        yield Error(message="LLM_URL is not set -- export it before starting web.py").to_sse()
+        yield ServerSentEvent(event="error", data={"message": "LLM_URL is not set -- export it before starting web.py"})
         return
     last = None
     async for event in run_turn(client, messages):
-        yield event.to_sse()
-        if isinstance(event, Done):
-            last = event
+        yield event
+        if event.event == "done":
+            last = event.data
     if last:
-        print(f"  turn: {last.n} clauses, {last.wall:.2f}s wall, "
-              f"{last.total_audio:.2f}s audio", flush=True)
+        print(f"  turn: {last['n']} clauses, {last['wall']:.2f}s wall, {last['total_audio']:.2f}s audio", flush=True)
 
 
-@app.post("/api/stt", response_model_exclude_none=True)
-async def post_stt(request: Request) -> SttResponse:
+@app.post("/api/stt")
+async def post_stt(request: Request) -> dict:
     # Always 200 with {text} or {error} so the page handles both uniformly.
     if not STT_ON:
-        return SttResponse(error="STT_URL is not set")
+        return {"error": "STT_URL is not set"}
     audio = await request.body()
     ctype = (request.headers.get("content-type") or "audio/webm").split(";")[0].strip()
     try:
         text = await transcribe(request.app.state.http, audio, ctype)
         print(f"  stt: {len(audio)} bytes -> {text[:60]!r}", flush=True)
-        return SttResponse(text=text)
+        return {"text": text}
     except Exception as e:
-        return SttResponse(error=f"{type(e).__name__}: {e}")
+        return {"error": f"{type(e).__name__}: {e}"}
 
 
 def main():
