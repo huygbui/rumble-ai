@@ -64,6 +64,7 @@ image = (
         # It is pure-Python (py3-none-any), so this clones + installs without compiling.
         f"vllm-omni @ git+https://github.com/vllm-project/vllm-omni@{VLLM_OMNI_REF}",
         f"vllm=={VLLM_VERSION}",  # re-pin so vllm-omni's resolve can't drift vllm
+        "fastapi<0.137",  # FastAPI 0.137 breaks vLLM's Prometheus middleware -> every request 500s; see llm/qwen3_5_4b.py
         "huggingface_hub[hf_transfer]",
     )
     .env(

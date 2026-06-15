@@ -58,6 +58,7 @@ image = (
     .uv_pip_install(
         f"vllm-omni=={VLLM_OMNI_VERSION}",
         f"vllm=={VLLM_VERSION}",  # re-pin so vllm-omni's resolve can't drift vllm
+        "fastapi<0.137",  # FastAPI 0.137 breaks vLLM's Prometheus middleware -> every request 500s; see llm/qwen3_5_4b.py
         "huggingface_hub[hf_transfer]",
     )
     # fish-speech pulls pyaudio, which builds a C extension -> needs a compiler.
@@ -75,7 +76,10 @@ image = (
     # (descript-audio-codec), not fish-speech's pydantic schemas / protobuf users
     # (tensorboard/wandb/gradio webui), none of which run during TTS serving.
     # (These two pip resolver "ERROR" lines at build time are expected and benign.)
-    .pip_install("pydantic>=2.12.0", "protobuf>=5.29.6,<6")
+    # Backstop fastapi<0.137 here too: fish-speech's gradio dep can pull fastapi forward,
+    # and 0.137 breaks vLLM's Prometheus middleware (every request 500s) -- same restore-
+    # LAST discipline as pydantic/protobuf above.
+    .pip_install("pydantic>=2.12.0", "protobuf>=5.29.6,<6", "fastapi<0.137")
     .env(
         {
             "HF_HUB_ENABLE_HF_TRANSFER": "1",

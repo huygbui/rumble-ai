@@ -61,6 +61,7 @@ image = (
     .uv_pip_install(
         f"vllm-omni=={VLLM_OMNI_VERSION}",
         f"vllm=={VLLM_VERSION}",  # re-pin so vllm-omni's resolve can't drift vllm
+        "fastapi<0.137",  # FastAPI 0.137 breaks vLLM's Prometheus middleware -> every request 500s; see llm/qwen3_5_4b.py
         "huggingface_hub[hf_transfer]",
     )
     .env(
