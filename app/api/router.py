@@ -13,10 +13,6 @@ INDEX = Path(__file__).resolve().parents[2] / "web" / "index.html"
 router = APIRouter()
 
 
-def _sse(event: pipeline.StreamEvent) -> ServerSentEvent:
-    return ServerSentEvent(event=event.event, data=event.data)
-
-
 @router.get("/")
 def index():
     return FileResponse(INDEX)
@@ -38,7 +34,7 @@ async def post_chat(req: ChatRequest, request: Request) -> AsyncIterator[ServerS
     client = request.app.state.http
     messages = [m.model_dump() for m in req.messages]
     async for event in pipeline.run_turn(client, messages):
-        yield _sse(event)
+        yield ServerSentEvent(event=event.event, data=event.data)
 
 
 @router.post("/api/stt", response_model=TranscriptionResponse)
