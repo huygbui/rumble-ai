@@ -38,11 +38,28 @@
   .row { max-width: 620px; margin: 0 auto; padding: 14px 20px; display: flex; gap: 12px; }
   input[type=text] { flex: 1; font: inherit; }   /* native box, page text size */
   button { font: inherit; }                       /* default button */
+
+  /* readiness: one dot per stage, dark when warm; warm-up button gates the controls */
+  .warm { display: flex; align-items: center; gap: 16px; margin: 0 0 22px; }
+  .dot { color: #bbb; }
+  .dot::before { content: "●"; margin-right: 6px; color: #ccc; }   /* cold / unknown */
+  .dot.warming, .dot.warming::before { color: #888; }
+  .dot.ready, .dot.ready::before { color: #111; }
+  .dot.failed { color: #999; }
+  .dot.failed::before { content: "×"; color: #999; }
+  #warm { margin-left: auto; }
 </style>
 
 <main>
   <h1>rumble · chat + voice</h1>
   <div class="sub" id="meta">connecting…</div>
+
+  <div class="warm">
+    <span class="dot" id="d-stt">stt</span>
+    <span class="dot" id="d-llm">llm</span>
+    <span class="dot" id="d-tts">tts</span>
+    <button id="warm" type="button">warm up</button>
+  </div>
 
   <details>
     <summary>system prompt</summary>
@@ -62,8 +79,9 @@
 
 <form id="composer">
   <div class="row">
+    <button id="mic" type="button" disabled>mic</button>
     <input type="text" id="input" placeholder="say something…" autocomplete="off" autofocus>
-    <button id="send">send</button>
+    <button id="send" disabled>send</button>
   </div>
 </form>
 
@@ -71,14 +89,103 @@
 const $ = id => document.getElementById(id);
 const fmt = s => s == null ? "–" : s.toFixed(2) + "s";
 const GAP = 0.09;                       // ~SAY_GAP_MS: one short pause between clauses
-let ttsOn = true, history = [], busy = false;
+let ttsOn = true, sttOn = false, history = [], busy = false;
 let audioCtx = null, playhead = 0;      // Web Audio cursor -> gapless in-order playback
+let ready = false, STAGES = [];         // STAGES = configured stages; ready = all of them warm
+const R = {};                           // per-stage readiness {stt,llm,tts}
 
 fetch("/api/meta").then(r => r.json()).then(m => {
-  ttsOn = m.tts_on;
-  $("meta").innerHTML = `LLM <b>${m.model}</b> ${m.llm ? "" : "(LLM_URL unset)"} · ` +
-    (m.tts_on ? `TTS <b>${m.tts_model}</b>` : "TTS <b>off</b> — text-only, export TTS_URL to hear it");
+  ttsOn = m.tts_on; sttOn = m.stt_on;
+  $("meta").innerHTML =
+    (m.stt_on ? `STT <b>${m.stt_model}</b>` : "STT <b>off</b>") + " · " +
+    `LLM <b>${m.model}</b>${m.llm ? "" : " (unset)"} · ` +
+    (m.tts_on ? `TTS <b>${m.tts_model}</b>` : "TTS <b>off</b>");
+  const on = { stt: sttOn, llm: !!m.llm, tts: ttsOn };       // hide dots for stages that are off
+  ["stt", "llm", "tts"].forEach(n => { if (!on[n]) $("d-" + n).style.display = "none"; });
+  STAGES = ["stt", "llm", "tts"].filter(n => on[n]);
+  $("note").textContent = "tap warm up to start the endpoints (each scales to zero when idle).";
+  refreshGates();                       // everything stays disabled until warm
 });
+
+// --- readiness / warm-up: buttons stay off until every stage's /health is 200 ---
+function setDot(name, state) {           // cold | warming | ready | failed
+  const d = $("d-" + name);
+  if (d) d.className = "dot " + (state === "cold" ? "" : state);
+}
+function updateReady() {
+  ready = STAGES.length > 0 && STAGES.every(n => R[n]);
+  refreshGates();
+}
+function refreshGates() {                 // single place that enables/disables the controls
+  $("send").disabled = !ready || busy;
+  setMic($("mic").dataset.state || "idle");
+}
+
+async function warm() {
+  const wb = $("warm");
+  wb.disabled = true; wb.textContent = "warming…";
+  STAGES.forEach(n => { if (!R[n]) setDot(n, "warming"); });
+  $("note").textContent = "warming up… a cold start can take ~1–3 min.";
+  try {
+    const res = await fetch("/api/warm");
+    const reader = res.body.getReader(), dec = new TextDecoder();
+    let buf = "";
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, { stream: true });
+      let i;
+      while ((i = buf.indexOf("\n\n")) >= 0) {
+        const block = buf.slice(0, i); buf = buf.slice(i + 2);
+        const ev = (block.match(/^event: (.*)$/m) || [])[1];
+        const data = JSON.parse((block.match(/^data: (.*)$/m) || [])[1] || "{}");
+        if (ev === "stage") { setDot(data.name, data.status); R[data.name] = data.status === "ready"; updateReady(); }
+        else if (ev === "done") { $("note").textContent = data.ready ? "all warm — go ahead." : "some stages didn't warm; tap warm up to retry."; }
+      }
+    }
+  } catch (e) { $("note").textContent = "warm error: " + e.message; }
+  wb.disabled = false; wb.textContent = ready ? "re-warm" : "warm up";
+}
+$("warm").addEventListener("click", warm);
+
+// --- mic: tap to record, tap to stop -> transcribe -> the transcript becomes your message ---
+let recorder = null, recStream = null;
+
+function setMic(state) {                 // idle | recording | transcribing
+  const b = $("mic");
+  b.dataset.state = state;
+  b.textContent = state === "recording" ? "stop" : state === "transcribing" ? "…" : "mic";
+  b.disabled = !sttOn || !ready || busy || state === "transcribing";
+  b.title = !sttOn ? "set STT_URL to enable the mic" : !ready ? "warm up first" : "";
+}
+
+async function toggleMic() {
+  if (recorder && recorder.state === "recording") { recorder.stop(); return; }  // -> onstop
+  try {
+    recStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  } catch (e) { $("note").textContent = "mic blocked: " + e.message; return; }
+  const chunks = [];
+  recorder = new MediaRecorder(recStream);
+  recorder.ondataavailable = e => { if (e.data.size) chunks.push(e.data); };
+  recorder.onstop = async () => {
+    recStream.getTracks().forEach(t => t.stop());           // release the mic
+    const blob = new Blob(chunks, { type: recorder.mimeType || "audio/webm" });
+    setMic("transcribing");
+    try {
+      const res = await fetch("/api/stt", { method: "POST",
+        headers: { "Content-Type": blob.type }, body: blob });
+      const data = await res.json();
+      setMic("idle");
+      if (data.error) { $("note").textContent = "STT: " + data.error; }
+      else if (data.text) { send(data.text); }              // transcript -> message -> reply
+      else { $("note").textContent = "STT: empty transcript"; }
+    } catch (e) { setMic("idle"); $("note").textContent = "STT error: " + e.message; }
+  };
+  recorder.start();
+  setMic("recording");
+}
+
+$("mic").addEventListener("click", toggleMic);
 
 function bubble(who) {
   const wrap = document.createElement("div");
@@ -111,7 +218,7 @@ async function playClause(b64) {
 
 async function send(text) {
   if (busy || !text.trim()) return;
-  busy = true; $("send").disabled = true;
+  busy = true; refreshGates();          // grey send + mic while the model replies
   ["m-ttft", "m-first", "m-full", "m-head"].forEach(id => $(id).textContent = "–");
   $("note").textContent = "";
 
@@ -180,7 +287,7 @@ async function send(text) {
       }
     }
   }
-  busy = false; $("send").disabled = false; $("input").focus();
+  busy = false; refreshGates(); $("input").focus();
 }
 
 $("composer").addEventListener("submit", e => {
