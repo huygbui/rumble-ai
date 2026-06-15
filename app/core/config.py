@@ -1,4 +1,4 @@
-from pydantic import Field, field_validator
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 DEFAULT_CHAT_SYSTEM = (
@@ -14,26 +14,23 @@ class AppSettings(BaseSettings):
         frozen=True,
     )
 
-    llm_url: str = Field(min_length=1)
+    llm_url: str = ""
     llm_model: str = "Qwen/Qwen3.5-4B"
     chat_max_tokens: int = 256
     chat_system: str = DEFAULT_CHAT_SYSTEM
 
-    tts_url: str = Field(min_length=1)
+    tts_url: str = ""
     tts_model: str = "omnivoice"
     tts_out_dir: str = "out"
     play: bool = False
     compare: bool = False
     omni_instructions: str = "female, child, high pitch, australian accent"
     omni_seed: int = 58842
-    tts_voice: str = "bench"
-    say_max_len: int = 140
-    say_first_max: int = 60
-    say_min_len: int = 12
-    say_gap_ms: int = 90
-    say_fade_ms: int = 8
+    clause_max_len: int = 140
+    clause_first_max: int = 60
+    clause_min_len: int = 12
 
-    stt_url: str = Field(min_length=1)
+    stt_url: str = ""
     stt_model: str = "Qwen/Qwen3-ASR-0.6B"
     warm_budget: int = 300
 

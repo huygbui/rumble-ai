@@ -12,10 +12,9 @@ claims for each (license / commercial terms, weights availability, self-host
 feasibility), and a synthesis stage ranked everything against the criteria above. Where
 a researcher and verifier disagreed, the verifier's reading is used here.
 
-Current baseline already in this repo: **Fish Speech S2 Pro** (`fishaudio/s2-pro`) — a
-zero-shot voice-cloning **TTS** model (~49 GB GPU peak) served on Modal via vLLM-Omni,
-under the Fish Audio Research License (research/non-commercial free; commercial via
-`business@fish.audio`). See `tts/fish_s2_pro.py` / `README.md`.
+Current repo default: **OmniVoice** (`k2-fsa/OmniVoice`) served on Modal via vLLM-Omni.
+Qwen3-TTS is kept as the heavier comparison path. See `tts/omnivoice.py`,
+`tts/qwen3.py`, and the top-level `README.md`.
 
 ---
 
@@ -40,11 +39,10 @@ under the Fish Audio Research License (research/non-commercial free; commercial 
 | 1 | **OmniVoice** (k2-fsa / Next-gen Kaldi) | TTS | ✅ **named "australian accent"** + `child`/`teenager` age attrs | ✅ Apache-2.0 (open) | ⭐ ~0.6B / 2.45 GB, **official vLLM-Omni** | **8** |
 | 2 | **Qwen3-TTS-1.7B** (Alibaba Qwen) | TTS | ⚠️ via cloning only (drifts to US) | ✅ Apache-2.0 (open) | ~1.7B / 3.8 GB, vLLM-Omni online | **7** |
 | 3 | **PersonaPlex-7B** (NVIDIA) | **S2S full-duplex** | ❌ US-only; custom voice blocked | ✅ NVIDIA Open Model License (no contact) | 7B, Moshi/Mimi stack (not vLLM-Omni) | **6** |
-| 4 | **Higgs Audio v3 TTS** (Boson AI) | TTS | ❌ via cloning only | ⚠️ non-commercial; commercial by contact (= Fish) | 4B / 9.3 GB, SGLang-Omni | **6** |
+| 4 | **Higgs Audio v3 TTS** (Boson AI) | TTS | ❌ via cloning only | ⚠️ non-commercial; commercial by contact | 4B / 9.3 GB, SGLang-Omni | **6** |
 | 5 | **MOSS-TTS-v1.5** (OpenMOSS / Fudan) | TTS | ❌ weakest AU story | ✅ Apache-2.0 (open) | 8B / ~17 GB, Transformers/SGLang | **6** |
 | 6 | **Nemotron 3 VoiceChat 12B** (NVIDIA) | S2S | ❌ US-only | ⚠️ permissive *in principle* — **gated early-access, no public weights** | not self-hostable now | **5** |
 | 7 | **Magpie TTS Multilingual** (NVIDIA) | TTS | ❌ US-only; **cloning removed** in open ckpt | ❌ **"commercial" vs HF-gate "non-commercial ONLY" contradiction** | 357M, NeMo / Riva-NIM | **4** |
-| – | _Fish S2 Pro (baseline)_ | TTS | ❌ via cloning only | ⚠️ contact-required | ~5B / ~49 GB peak | 6 |
 
 ---
 
@@ -53,11 +51,11 @@ under the Fish Audio Research License (research/non-commercial free; commercial 
 **Spin up OmniVoice first, run Qwen3-TTS-1.7B alongside it as a de-risked hedge, and
 treat PersonaPlex-7B as a separate, time-boxed S2S spike** (to learn the conversational
 ceiling, not as a baseline replacement). Scaffolds for the first two are in
-`tts/omnivoice.py` and `tts/qwen3.py`, modeled on `tts/fish_s2_pro.py`.
+`tts/omnivoice.py` and `tts/qwen3.py`.
 
 Concretely:
 1. Stand both TTS models up on the existing vLLM-Omni / OpenAI-compatible path; benchmark
-   cold-start, RTF, and concurrency against Fish (`bench.py` is a starting point).
+   cold-start, RTF, and concurrency (`bench.py` is a starting point).
 2. Run a **blind AU listening test** — OmniVoice's `instructions="…australian accent…"`
    attribute *and* a consented-AU voice clone, for both models, judged by AU listeners.
 3. Probe **OOD-text robustness** (gibberish, code-switching, very long, adversarial
@@ -79,12 +77,12 @@ Concretely:
   more consistent path.
 - **License:** **Apache-2.0** (verified against the actual `LICENSE`, ©2026 Xiaomi Corp.;
   the arXiv "CC-BY-4.0" is the *paper* license, not the model). Open commercial use, no
-  contact, no paywall — strictly better than Fish. Non-binding ethical-use disclaimer only.
+  contact, no paywall. Non-binding ethical-use disclaimer only.
 - **Self-host:** the field's easiest. ~613M params (Qwen3-0.6B base) fp32, `model.safetensors`
   2.45 GB + a 24 kHz codec (`audio_tokenizer/`, ~806 MB) that downloads with the repo.
-  Ungated. Realistically runs on a 24 GB GPU (L4/A10G), far under the ~49 GB Fish baseline;
-  RTF ~0.025. **Official vLLM-Omni support** (`OmniVoiceModel`, OpenAI-compatible
-  `/v1/audio/speech`) — reuses your existing serving recipe.
+  Ungated. Realistically runs on a 24 GB GPU (L4/A10G); RTF ~0.025. **Official
+  vLLM-Omni support** (`OmniVoiceModel`, OpenAI-compatible `/v1/audio/speech`) —
+  reuses your existing serving recipe.
 - **Watch out for:** research-grade pace / informal support; AU quality is attribute-
   conditioned and unverified; the clean online voice-design/cloning request adapter
   (`instructions` / `ref_audio` mapping) landed 2026-06-13 in vLLM-Omni **v0.23.0rc1** /
@@ -130,7 +128,7 @@ Concretely:
   stated they "can't promise custom voice" due to legal approval — so you can't supply an
   AU reference. Fails the AU goal; English-only.
 - **License:** NVIDIA Open Model License + CC-BY-4.0; "ready for commercial use," royalty-
-  free, no business contact (a win over Fish). **Conditions that matter for kids:** rights
+  free, no business contact. **Conditions that matter for kids:** rights
   **auto-terminate** if you weaken/circumvent any safety guardrail; bound to NVIDIA
   Trustworthy-AI / AI-ethics terms; revocable, AS-IS. Get legal sign-off; a blog-vs-card
   commercial-status inconsistency is worth confirming in writing.
@@ -151,13 +149,13 @@ Concretely:
 - **AU English:** ❌ native — no AU preset, no accent-control token (controls cover
   emotion/style/prosody/SFX, not region). AU only via cloning (unverified; needs consent).
 - **License:** v3 TTS = Boson Research & Non-Commercial License; commercial requires a
-  separate license via `contact@boson.ai` — **same gating tier as Fish, not an
-  improvement.** Mandates conspicuous **AI-generated disclosure** (a kids-app UX/compliance
-  constraint); has explicit child-protection/consent clauses (policy, not enforcement).
+  separate license via `contact@boson.ai`. Mandates conspicuous **AI-generated disclosure**
+  (a kids-app UX/compliance constraint); has explicit child-protection/consent clauses
+  (policy, not enforcement).
   Fallback: the older **v2** model is commercially free under 100k annual active users.
 - **Self-host:** **ungated/public** (corrected from "gated"); `model.safetensors` 9.31 GB,
-  single 24–48 GB GPU; lighter than Fish. Official path is **SGLang-Omni** (not vLLM-Omni) —
-  a new serving stack vs your baseline. Transformers serving is not officially documented.
+  single 24–48 GB GPU. Official path is **SGLang-Omni** (not vLLM-Omni) —
+  a new serving stack. Transformers serving is not officially documented.
 - **Sources:** `huggingface.co/bosonai/higgs-audio-v3-tts-4b` (+ `LICENSE`),
   `github.com/boson-ai/higgs-audio`, `lmsys.org/blog/2026-06-04-higgs-audio-v3-tts/`.
 
@@ -168,8 +166,7 @@ Concretely:
 - **AU English:** ❌ weakest story — no AU mention, no accent control, China-heavy training;
   AU only via cloning (unverified). Biggest fit risk despite strong generic English.
 - **License:** **Apache-2.0** (HF metadata + GitHub "MOSS-TTS Family … Apache License 2.0").
-  Open commercial, no contact, no AUP — major advantage over Fish (flip side: misuse
-  responsibility entirely on you).
+  Open commercial, no contact, no AUP (flip side: misuse responsibility entirely on you).
 - **Self-host:** standard HF Transformers; ~17 GB BF16 (4 shards) on a 24 GB card; SGLang
   ~3×; torch-free llama.cpp/ONNX/TensorRT. Needs bleeding-edge Transformers 5.0; recipes
   still maturing. No documented vLLM-Omni path. (The "fits 8 GB quantized" claim is
@@ -204,32 +201,24 @@ Concretely:
 
 ---
 
-## Head-to-head vs the Fish S2 Pro baseline
+## Why OmniVoice and Qwen stay in repo
 
-The top alternatives improve on Fish's two biggest weaknesses — **license** and **cost** —
-while at least matching it elsewhere:
+The current repo keeps the two candidates that best match the product constraints:
 
-- **Licensing:** OmniVoice, Qwen3-TTS, MOSS are all Apache-2.0 (open commercial, no contact);
-  PersonaPlex is permissive NVIDIA-Open — all strictly better than Fish's mandatory
-  `business@fish.audio` gate. Only Higgs v3 ties Fish (non-commercial by contact).
-- **Cost / self-host:** every alternative is far lighter than Fish's ~49 GB peak (OmniVoice
-  ~2.45 GB, Qwen3 ~3.8 GB, Higgs 9.3 GB, MOSS ~17 GB, PersonaPlex 7B) — a large GPU-cost cut.
-- **Serving reuse:** only **OmniVoice** and **Qwen3-TTS** reuse your Modal + vLLM-Omni +
-  `/v1/audio/speech` recipe. Higgs (SGLang-Omni), MOSS (Transformers/SGLang), and PersonaPlex
-  (Moshi) introduce a new stack.
-- **AU English:** **OmniVoice is the only model that beats the baseline** (named AU control +
-  cloning + kid age attributes). Every other TTS matches Fish (AU-by-cloning-only); the
-  NVIDIA S2S models are worse (US-only; PersonaPlex blocks custom voice).
-- **Naturalness:** Fish, Higgs, Qwen, MOSS, OmniVoice are all expressive TTS in the same tier
-  (Higgs has the richest emotion controls). **PersonaPlex** is the only one that exceeds
-  read-aloud TTS via true full-duplex turn-taking — the one axis where the TTS paradigm itself
-  is the limitation.
-- **Safety/OOD:** a wash — none of the TTS models (Fish included) add model-level guardrails;
-  S2S is *harder* to bound. The real safety work is upstream regardless of choice.
+- **Licensing:** OmniVoice and Qwen3-TTS are Apache-2.0, open for commercial use, and do
+  not require a business-contact license path.
+- **Serving reuse:** both run through Modal + vLLM-Omni + `/v1/audio/speech`. Higgs
+  (SGLang-Omni), MOSS (Transformers/SGLang), and PersonaPlex (Moshi) introduce new
+  serving stacks.
+- **AU English:** OmniVoice is the only researched model with a named AU control plus
+  child/teenager age attributes. Qwen3 stays as the cloning-capable hedge.
+- **Cost / footprint:** OmniVoice is small enough for 24 GB GPUs; Qwen3 is heavier but
+  still open and well-supported by the vLLM-Omni path.
+- **Safety/OOD:** none of the TTS models add model-level guardrails. The real safety work
+  remains upstream in STT -> dialogue-LLM -> moderation.
 
-**Net:** OmniVoice is a clear upgrade over Fish (better license, far cheaper, only model with
-native AU, reuses your stack); Qwen3-TTS is a like-for-like-but-cheaper-and-openly-licensed
-swap; PersonaPlex is a different (S2S) paradigm to explore, not a baseline replacement.
+**Net:** OmniVoice is the default path; Qwen3-TTS is the comparison/hedge; PersonaPlex is
+a separate S2S spike if the product needs full-duplex conversation later.
 
 ---
 
@@ -238,7 +227,7 @@ swap; PersonaPlex is a different (S2S) paradigm to explore, not a baseline repla
 1. **AU accent fidelity** — blind-test OmniVoice's named attribute and AU clones (all models)
    with Australian listeners. Highest-priority unknown for the primary criterion.
 2. **OmniVoice on your stack** — does the official vLLM-Omni path run cleanly on your Modal
-   image/pins, and what are real cold-start / RTF / concurrency numbers vs Fish?
+   image/pins, and what are real cold-start / RTF / concurrency numbers?
 3. **Qwen3-TTS streaming** — is online vLLM-Omni serving production-ready under your concurrency
    targets, and does the 2-engine VRAM blow-up bite at 1.7B?
 4. **OOD-text robustness** — empirically characterize hallucination/skipping/drift on

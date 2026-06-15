@@ -7,7 +7,7 @@ from dataclasses import dataclass
 
 import httpx
 
-from app.core import llm, text_chunks, tts
+from app.core import clauses, llm, tts
 from app.core.config import settings
 
 STT_EXT = {
@@ -21,9 +21,12 @@ STT_EXT = {
 
 
 @dataclass(frozen=True, slots=True)
-class StreamEvent:
+class Event:
     event: str
     data: dict[str, object]
+
+
+QueueItem = Event | str | None
 
 
 def meta_payload() -> dict[str, object]:
@@ -39,13 +42,14 @@ def meta_payload() -> dict[str, object]:
     }
 
 
-async def run_turn(client: httpx.AsyncClient, messages: list[dict]) -> AsyncIterator[StreamEvent]:
-    clauses: asyncio.Queue = asyncio.Queue()
+async def run_turn(client: httpx.AsyncClient, messages: list[dict]) -> AsyncIterator[Event]:
+    out: asyncio.Queue[QueueItem] = asyncio.Queue()
     t0 = time.time()
 
     async def produce():
-        splitter = text_chunks.StreamingClauseSplitter()
+        buffer = clauses.ClauseBuffer()
         ttft_sent = False
+
         try:
             async with client.stream("POST", settings.llm_chat_url, json=llm.make_chat_payload(messages)) as r:
                 r.raise_for_status()
@@ -54,19 +58,18 @@ async def run_turn(client: httpx.AsyncClient, messages: list[dict]) -> AsyncIter
                         continue
                     if not ttft_sent and delta.strip():
                         ttft_sent = True
-                        await clauses.put(StreamEvent("ttft", {"t": time.time() - t0}))
-                    for clause in splitter.feed(delta):
-                        await clauses.put(clause)
-            for clause in splitter.flush():
-                await clauses.put(clause)
+                        await out.put(Event("ttft", {"t": time.time() - t0}))
+                    for clause in buffer.feed(delta):
+                        await out.put(clause)
+            for clause in buffer.flush():
+                await out.put(clause)
         except Exception as e:
-            await clauses.put(StreamEvent("error", {"message": f"{type(e).__name__}: {e}"}))
-        await clauses.put(None)
+            await out.put(Event("error", {"message": f"{type(e).__name__}: {e}"}))
+        await out.put(None)
 
     task = asyncio.create_task(produce())
     try:
-        gen = _voice_turn(client, clauses, t0) if settings.tts_on else _text_turn(clauses, t0)
-        async for event in gen:
+        async for event in _emit_turn(client, out, t0, audio=settings.tts_on):
             yield event
     finally:
         task.cancel()
@@ -74,47 +77,38 @@ async def run_turn(client: httpx.AsyncClient, messages: list[dict]) -> AsyncIter
             await task
 
 
-async def _text_turn(clauses, t0) -> AsyncIterator[StreamEvent]:
-    parts: list[str] = []
-    while (item := await clauses.get()) is not None:
-        if isinstance(item, StreamEvent):
-            yield item
-            continue
-        parts.append(item)
-        yield StreamEvent("clause", {"i": len(parts) - 1, "text": item, "t_ready": time.time() - t0})
-    yield StreamEvent(
-        "done",
-        {"wall": time.time() - t0, "total_audio": 0.0, "n": len(parts), "full_reply": " ".join(parts)},
-    )
-
-
-async def _voice_turn(client, clauses, t0) -> AsyncIterator[StreamEvent]:
+async def _emit_turn(
+    client: httpx.AsyncClient,
+    items: asyncio.Queue[QueueItem],
+    t0: float,
+    audio: bool,
+) -> AsyncIterator[Event]:
     parts, total_audio, i = [], 0.0, 0
-    while (item := await clauses.get()) is not None:
-        if isinstance(item, StreamEvent):
+    while (item := await items.get()) is not None:
+        if isinstance(item, Event):
             yield item
             continue
-        try:
-            synth_s, wav = await synthesize_clause(client, item)
-        except Exception as e:
-            yield StreamEvent("error", {"message": f"{type(e).__name__}: {e}"})
-            continue
-        dur = tts.wav_duration(wav)
-        total_audio += dur
+
         parts.append(item)
-        yield StreamEvent(
-            "clause",
-            {
-                "i": i,
-                "text": item,
-                "t_ready": time.time() - t0,
+        payload: dict[str, object] = {"i": i, "text": item, "t_ready": time.time() - t0}
+        if audio:
+            try:
+                synth_s, wav = await synthesize_clause(client, item)
+            except Exception as e:
+                yield Event("clause", payload)
+                yield Event("error", {"message": f"{type(e).__name__}: {e}"})
+                i += 1
+                continue
+            dur = tts.wav_duration(wav)
+            total_audio += dur
+            payload |= {
                 "synth_s": synth_s,
                 "audio_s": dur,
                 "wav_b64": base64.b64encode(wav).decode(),
-            },
-        )
+            }
+        yield Event("clause", payload)
         i += 1
-    yield StreamEvent(
+    yield Event(
         "done",
         {
             "wall": time.time() - t0,
@@ -151,28 +145,21 @@ async def _health_ok(client: httpx.AsyncClient, base: str) -> bool:
         return False
 
 
-async def warm_stream(client: httpx.AsyncClient) -> AsyncIterator[StreamEvent]:
+async def warm(client: httpx.AsyncClient) -> dict[str, object]:
     stages = _stages()
     if not stages:
-        yield StreamEvent("done", {"ready": False})
-        return
+        return {"ready": False, "stages": []}
     t0 = time.time()
 
     async def warm_up(name, base):
         while time.time() - t0 < settings.warm_budget:
             if await _health_ok(client, base):
-                return name, True, time.time() - t0
+                return {"name": name, "status": "ready", "t": time.time() - t0}
             await asyncio.sleep(2)
-        return name, False, time.time() - t0
+        return {"name": name, "status": "failed", "t": time.time() - t0}
 
-    yield StreamEvent("warming", {"stages": [n for n, _ in stages]})
-    tasks = [asyncio.create_task(warm_up(n, b)) for n, b in stages]
-    all_ok = True
-    for done in asyncio.as_completed(tasks):
-        name, ok, t = await done
-        all_ok &= ok
-        yield StreamEvent("stage", {"name": name, "status": "ready" if ok else "failed", "t": t})
-    yield StreamEvent("done", {"ready": all_ok})
+    results = await asyncio.gather(*(warm_up(name, base) for name, base in stages))
+    return {"ready": all(result["status"] == "ready" for result in results), "stages": results}
 
 
 async def transcribe(client: httpx.AsyncClient, audio: bytes, ctype: str, attempts: int = 4) -> str:

@@ -5,7 +5,7 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse
 from fastapi.sse import EventSourceResponse, ServerSentEvent
 
-from app.api.schemas import ChatRequest, MetaResponse, TranscriptionResponse
+from app.api.schemas import ChatRequest, MetaResponse, TranscriptionResponse, WarmResponse
 from app.core import pipeline
 
 INDEX = Path(__file__).resolve().parents[2] / "web" / "index.html"
@@ -23,10 +23,9 @@ def meta() -> dict:
     return pipeline.meta_payload()
 
 
-@router.get("/api/warm", response_class=EventSourceResponse)
-async def warm(request: Request) -> AsyncIterator[ServerSentEvent]:
-    async for event in pipeline.warm_stream(request.app.state.http):
-        yield _sse(event)
+@router.post("/api/warm", response_model=WarmResponse)
+async def warm(request: Request) -> dict:
+    return await pipeline.warm(request.app.state.http)
 
 
 @router.post("/api/chat", response_class=EventSourceResponse)

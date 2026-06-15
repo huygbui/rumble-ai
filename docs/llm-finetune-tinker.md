@@ -247,9 +247,8 @@ https://www.datacamp.com/tutorial/tinker-tutorial)
 ## Recommended staged plan (cheapest-first, tailored to this repo)
 
 The `llm/` stage is currently empty (`llm/README.md`: "one Modal app per model, mirroring
-`tts/`"). Mirror the `tts/` pattern (one Modal app per candidate, OpenAI-compatible
-endpoint) exactly as `tts/omnivoice.py` mirrors `tts/fish_s2_pro.py`. Spend stays at ~$0
-training until a fine-tune is *earned*.
+`tts/`"). Mirror the `tts/` pattern: one Modal app per candidate, with an
+OpenAI-compatible endpoint. Spend stays at ~$0 training until a fine-tune is *earned*.
 
 **Stage 0 — Build the eval set FIRST (no training).** A few hundred AU-English kid prompts
 + adversarial/safety probes with a rubric: age-appropriateness, AU idiom/register, concise

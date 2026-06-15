@@ -21,5 +21,16 @@ class MetaResponse(BaseModel):
     stt_on: bool
 
 
+class WarmStage(BaseModel):
+    name: str
+    status: str
+    t: float
+
+
+class WarmResponse(BaseModel):
+    ready: bool
+    stages: list[WarmStage]
+
+
 class TranscriptionResponse(BaseModel):
     text: str

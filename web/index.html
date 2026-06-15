@@ -145,11 +145,12 @@ async function warm() {
   STAGES.forEach(n => { if (!R[n]) setDot(n, "warming"); });
   $("note").textContent = "warming up… ~20–40s from snapshot (a minute or two on the very first build).";
   try {
-    const res = await fetch("/api/warm");
-    await readSSE(res, (ev, data) => {
-      if (ev === "stage") { setDot(data.name, data.status); R[data.name] = data.status === "ready"; updateReady(); }
-      else if (ev === "done") { $("note").textContent = data.ready ? "all warm — go ahead." : "some stages didn't warm; tap warm up to retry."; }
-    });
+    const res = await fetch("/api/warm", { method: "POST" });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || res.statusText);
+    data.stages.forEach(s => { setDot(s.name, s.status); R[s.name] = s.status === "ready"; });
+    updateReady();
+    $("note").textContent = data.ready ? "all warm — go ahead." : "some stages didn't warm; tap warm up to retry.";
   } catch (e) { $("note").textContent = "warm error: " + e.message; }
   wb.disabled = false; wb.textContent = ready ? "re-warm" : "warm up";
 }
@@ -183,7 +184,7 @@ async function toggleMic() {
         headers: { "Content-Type": blob.type }, body: blob });
       const data = await res.json();
       setMic("idle");
-      if (data.error) { $("note").textContent = "STT: " + data.error; }
+      if (!res.ok) { $("note").textContent = "STT: " + (data.detail || res.statusText); }
       else if (data.text) { send(data.text); }              // transcript -> message -> reply
       else { $("note").textContent = "STT: empty transcript"; }
     } catch (e) { setMic("idle"); $("note").textContent = "STT error: " + e.message; }
