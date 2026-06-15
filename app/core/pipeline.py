@@ -40,6 +40,8 @@ Item = str | Exception | None
 
 def meta_payload() -> dict[str, object]:
     return {
+        "language": settings.language,
+        "stt_language": settings.stt_language,
         "llm": settings.llm_url or None,
         "model": settings.llm_model,
         "tts": settings.tts_url or None,
@@ -64,17 +66,40 @@ async def warm(client: httpx.AsyncClient) -> dict[str, object]:
         return {"ready": False, "stages": []}
 
     async def warm_stage(name: str, base: str) -> dict[str, object]:
-        try:
-            async with asyncio.timeout(settings.warm_budget):
-                while True:
-                    if await _health_ok(client, base):
-                        return {"name": name, "status": "ready"}
-                    await asyncio.sleep(2)
-        except TimeoutError:
-            return {"name": name, "status": "failed"}
+        ready = await _poll_health(client, base, settings.warm_budget)
+        return {"name": name, "status": "ready" if ready else "failed"}
 
     results = await asyncio.gather(*(warm_stage(name, base) for name, base in stages))
     return {"ready": all(result["status"] == "ready" for result in results), "stages": results}
+
+
+async def ensure_ready(client: httpx.AsyncClient, *bases: str) -> bool:
+    """Wait out a cold start: poll /health per stage, bounded by cold_start_budget.
+
+    Avoids racing the first real call against a Flash 503. Empty URLs are skipped;
+    returns False if a stage never comes up.
+    """
+    targets = [base for base in bases if base]
+    if not targets:
+        return True
+    results = await asyncio.gather(
+        *(_poll_health(client, base, settings.cold_start_budget) for base in targets)
+    )
+    return all(results)
+
+
+def _with_language(messages: list[dict]) -> list[dict]:
+    """Append a "reply in <language>" directive for non-English languages (no-op for English)."""
+    directive = f" Always reply in {settings.language}."
+    if settings.language == "English" or not messages:
+        return messages
+    head, *rest = messages
+    if head.get("role") == "system":
+        if directive.strip() in head.get("content", ""):
+            return messages
+        return [{**head, "content": head.get("content", "") + directive}, *rest]
+    system = {"role": "system", "content": settings.chat_system_prompt}
+    return [system, *messages]
 
 
 async def chat_events(
@@ -82,7 +107,7 @@ async def chat_events(
     messages: list[dict],
 ) -> AsyncIterator[Event]:
     queue: asyncio.Queue[Item] = asyncio.Queue()
-    source = clauses.stream(llm.stream(client, messages))
+    source = clauses.stream(llm.stream(client, _with_language(messages)))
     events = _speak(client, queue) if settings.tts_url else _text(queue)
 
     # Keep clause reading independent from event emission; this lets TTS overlap when enabled.
@@ -148,4 +173,15 @@ async def _health_ok(client: httpx.AsyncClient, base: str) -> bool:
         r = await client.get(f"{base}/health", timeout=30)
         return r.status_code == 200
     except httpx.HTTPError:
+        return False
+
+
+async def _poll_health(client: httpx.AsyncClient, base: str, budget: float) -> bool:
+    """Poll /health until it answers 200 or the budget elapses."""
+    try:
+        async with asyncio.timeout(budget):
+            while not await _health_ok(client, base):
+                await asyncio.sleep(2)
+            return True
+    except TimeoutError:
         return False

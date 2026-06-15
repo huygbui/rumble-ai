@@ -8,7 +8,7 @@ async def synthesize(http: httpx.AsyncClient, text: str) -> bytes:
     body = {
         "input": text,
         "instructions": settings.omni_instructions,
-        "language": "English",
+        "language": settings.language,
         "response_format": "wav",
         "seed": settings.omni_seed,
     }

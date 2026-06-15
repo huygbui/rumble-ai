@@ -104,7 +104,8 @@ const R = {};                           // per-stage readiness {stt,llm,tts}
 fetch("/api/meta").then(r => r.json()).then(m => {
   ttsOn = m.tts_on; sttOn = m.stt_on;
   $("meta").innerHTML =
-    (m.stt_on ? `STT <b>${m.stt_model}</b>` : "STT <b>off</b>") + " · " +
+    `lang <b>${m.language}</b> · ` +
+    (m.stt_on ? `STT <b>${m.stt_model}</b>${m.stt_language ? ` (${m.stt_language})` : ""}` : "STT <b>off</b>") + " · " +
     `LLM <b>${m.model}</b>${m.llm ? "" : " (unset)"} · ` +
     (m.tts_on ? "TTS <b>on</b>" : "TTS <b>off</b>");
   const on = { stt: sttOn, llm: !!m.llm, tts: ttsOn };       // hide dots for stages that are off

@@ -15,6 +15,8 @@ class SpeechRequest(BaseModel):
 
 
 class MetaResponse(BaseModel):
+    language: str
+    stt_language: str | None
     llm: str | None
     model: str
     tts: str | None
