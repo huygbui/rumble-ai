@@ -16,6 +16,11 @@ one `client.py` drives any of them via `TTS_MODEL`.
 ## Repo layout
 
 ```
+app/                  # FastAPI app package
+  main.py             # create_app(), lifespan, app, and `python web.py` launcher target
+  api/                # HTTP boundary: routers and Pydantic request/response schemas
+  core/               # reusable pipeline logic: LLM streaming, TTS chunking, STT, warm-up
+  cli/                # CLI adapters for the top-level scripts
 tts/                  # TTS component — one Modal app per candidate model
   fish_s2_pro.py      # fishaudio/s2-pro — baseline (research license, ~49 GiB, 80GB GPU)
   omnivoice.py        # k2-fsa/OmniVoice — top pick (Apache-2.0, native AU accent, 24GB GPU)
@@ -23,7 +28,9 @@ tts/                  # TTS component — one Modal app per candidate model
 stt/                  # (next) speech-to-text candidates — one Modal app per model
 llm/                  # (next) dialogue-LLM candidates — one Modal app per model
 client.py             # drive any /v1/audio/speech endpoint; per-model shape via TTS_MODEL
-say.py                # low-latency "say this": pipelines clause synth -> fast first audio
+web.py                # compatibility launcher: `uvicorn web:app` or `python web.py`
+say.py                # compatibility launcher for low-latency "say this"
+chat.py               # compatibility launcher for the text-to-voice chat loop
 bench.py              # latency / streaming / concurrency benchmark
 docs/
   tts-options.md      # ranked evaluation of TTS/S2S options for this use case
