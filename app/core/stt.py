@@ -21,4 +21,6 @@ async def transcribe(http: httpx.AsyncClient, audio: bytes, content_type: str) -
         files={"file": (filename, audio, content_type)},
         data={"model": settings.stt_model},
     )
-    return (response.json().get("text") or "").strip()
+    payload = response.json()
+    text = payload.get("text") or ""
+    return text.strip()
