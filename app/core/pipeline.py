@@ -37,10 +37,10 @@ def meta_payload() -> dict[str, object]:
         "llm": settings.llm_url or None,
         "model": settings.llm_model,
         "tts": settings.tts_url or None,
-        "tts_on": settings.tts_on,
+        "tts_on": bool(settings.tts_url),
         "stt": settings.stt_url or None,
         "stt_model": settings.stt_model,
-        "stt_on": settings.stt_on,
+        "stt_on": bool(settings.stt_url),
     }
 
 
@@ -55,7 +55,7 @@ async def run_turn(client: httpx.AsyncClient, messages: list[dict]) -> AsyncIter
         try:
             async with client.stream(
                 "POST",
-                settings.llm_chat_url,
+                f"{settings.llm_url}/v1/chat/completions",
                 json={
                     "model": settings.llm_model,
                     "messages": messages,
@@ -94,7 +94,7 @@ async def run_turn(client: httpx.AsyncClient, messages: list[dict]) -> AsyncIter
 
     task = asyncio.create_task(produce())
     try:
-        async for event in _emit_turn(client, out, t0, audio=settings.tts_on):
+        async for event in _emit_turn(client, out, t0, audio=bool(settings.tts_url)):
             yield event
     finally:
         task.cancel()
@@ -151,7 +151,7 @@ async def _emit_turn(
 async def synthesize_clause(client: httpx.AsyncClient, text: str) -> tuple[float, bytes]:
     t0 = time.time()
     r = await client.post(
-        settings.tts_speech_url,
+        f"{settings.tts_url}/v1/audio/speech",
         json={
             "input": text,
             "instructions": settings.omni_instructions,
@@ -166,11 +166,11 @@ async def synthesize_clause(client: httpx.AsyncClient, text: str) -> tuple[float
 
 def _stages() -> list[tuple[str, str]]:
     stages = []
-    if settings.stt_on:
+    if settings.stt_url:
         stages.append(("stt", settings.stt_url))
     if settings.llm_url:
         stages.append(("llm", settings.llm_url))
-    if settings.tts_on:
+    if settings.tts_url:
         stages.append(("tts", settings.tts_url))
     return stages
 

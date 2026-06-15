@@ -35,25 +35,5 @@ class AppSettings(BaseSettings):
     def _strip_url(cls, value: str | None) -> str:
         return (value or "").rstrip("/")
 
-    @property
-    def llm_chat_url(self) -> str:
-        if not self.llm_url:
-            return ""
-        return f"{self.llm_url}/v1/chat/completions"
-
-    @property
-    def tts_speech_url(self) -> str:
-        if not self.tts_url:
-            return ""
-        return f"{self.tts_url}/v1/audio/speech"
-
-    @property
-    def tts_on(self) -> bool:
-        return bool(self.tts_url)
-
-    @property
-    def stt_on(self) -> bool:
-        return bool(self.stt_url)
-
 
 settings = AppSettings()
