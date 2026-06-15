@@ -12,7 +12,7 @@ def _error(response: httpx.Response) -> str:
     return f"{response.status_code} {response.text[:160]}"
 
 
-async def post(http: httpx.AsyncClient, stage: str, url: str, **kwargs) -> httpx.Response:
+async def post(http: httpx.AsyncClient, url: str, **kwargs) -> httpx.Response:
     last_error = ""
     for attempt in range(ATTEMPTS):
         response = await http.post(url, follow_redirects=True, **kwargs)
@@ -22,10 +22,10 @@ async def post(http: httpx.AsyncClient, stage: str, url: str, **kwargs) -> httpx
         last_error = _error(response)
         if attempt < ATTEMPTS - 1:
             await asyncio.sleep(RETRY_DELAY)
-    raise RuntimeError(f"{stage} not ready after {ATTEMPTS} tries: {last_error}")
+    raise RuntimeError(f"Service not ready after {ATTEMPTS} tries: {last_error}")
 
 
-async def stream_lines(http: httpx.AsyncClient, stage: str, url: str, **kwargs) -> AsyncIterator[str]:
+async def stream_lines(http: httpx.AsyncClient, url: str, **kwargs) -> AsyncIterator[str]:
     last_error = ""
     for attempt in range(ATTEMPTS):
         async with http.stream("POST", url, follow_redirects=True, **kwargs) as response:
@@ -39,4 +39,4 @@ async def stream_lines(http: httpx.AsyncClient, stage: str, url: str, **kwargs) 
                 return
         if attempt < ATTEMPTS - 1:
             await asyncio.sleep(RETRY_DELAY)
-    raise RuntimeError(f"{stage} not ready after {ATTEMPTS} tries: {last_error}")
+    raise RuntimeError(f"Service not ready after {ATTEMPTS} tries: {last_error}")

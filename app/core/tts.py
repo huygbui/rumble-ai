@@ -12,5 +12,5 @@ async def synthesize(http: httpx.AsyncClient, text: str) -> bytes:
         "response_format": "wav",
         "seed": settings.omni_seed,
     }
-    response = await client.post(http, "TTS", settings.tts_speech_url, json=body)
+    response = await client.post(http, settings.tts_speech_url, json=body)
     return response.content

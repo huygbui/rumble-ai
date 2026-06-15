@@ -17,7 +17,6 @@ async def transcribe(http: httpx.AsyncClient, audio: bytes, content_type: str) -
     filename = f"speech.{AUDIO_EXT_BY_TYPE.get(content_type, 'webm')}"
     response = await client.post(
         http,
-        "STT",
         settings.stt_transcriptions_url,
         files={"file": (filename, audio, content_type)},
         data={"model": settings.stt_model},

@@ -19,7 +19,7 @@ async def stream(http: httpx.AsyncClient, messages: list[dict]) -> AsyncIterator
         "chat_template_kwargs": {"enable_thinking": False},
         "stream": True,
     }
-    async for line in client.stream_lines(http, "LLM", settings.llm_chat_url, json=body):
+    async for line in client.stream_lines(http, settings.llm_chat_url, json=body):
         if not line.startswith("data:"):
             continue
         data = line[5:].strip()
