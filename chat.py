@@ -11,7 +11,7 @@
 #   thread: llm_reader            (in llm_reader)   thread: synth_worker   main: player
 # While clause 0 PLAYS, clause 1 SYNTHESIZES, and the LLM is still GENERATING clause 2.
 #
-#   export LLM_URL="https://<workspace>--qwen3-5-4b-llm-serve.modal.run"
+#   export LLM_URL="<flash url printed by `modal deploy llm/qwen3_5_4b.py`>"  # GPU-snapshot Flash server
 #   export TTS_URL="https://<workspace>--omnivoice-tts-serve.modal.run"   # omit -> text-only
 #   echo "tell me a tiny story about a wombat" | python chat.py
 #   CHAT_TEXT="g'day!" python chat.py     # one turn via env
