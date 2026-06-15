@@ -10,6 +10,10 @@ class ChatRequest(BaseModel):
     messages: list[Message]
 
 
+class SpeechRequest(BaseModel):
+    text: str
+
+
 class MetaResponse(BaseModel):
     llm: str | None
     model: str

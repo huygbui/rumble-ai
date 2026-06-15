@@ -92,7 +92,7 @@ async def _text(queue: asyncio.Queue[Item]) -> AsyncIterator[Event]:
     while (item := await queue.get()) is not None:
         if isinstance(item, Exception):
             failed = True
-            yield _error(item)
+            yield Event("error", {"message": str(item)})
             continue
 
         reply.append(item)
@@ -111,7 +111,7 @@ async def _speak(client: httpx.AsyncClient, queue: asyncio.Queue[Item]) -> Async
     while (item := await queue.get()) is not None:
         if isinstance(item, Exception):
             failed = True
-            yield _error(item)
+            yield Event("error", {"message": str(item)})
             continue
 
         reply.append(item)
@@ -120,7 +120,7 @@ async def _speak(client: httpx.AsyncClient, queue: asyncio.Queue[Item]) -> Async
             wav = await tts.synthesize(client, item)
         except Exception as e:
             yield Event("clause", payload)
-            yield _error(e)
+            yield Event("error", {"message": str(e)})
             continue
         payload["wav_b64"] = base64.b64encode(wav).decode()
         yield Event("clause", payload)
@@ -130,11 +130,6 @@ async def _speak(client: httpx.AsyncClient, queue: asyncio.Queue[Item]) -> Async
         "done",
         {"full_reply": " ".join(reply)},
     )
-
-
-def _error(e: Exception) -> Event:
-    return Event("error", {"message": f"{type(e).__name__}: {e}"})
-
 
 async def _health_ok(client: httpx.AsyncClient, base: str) -> bool:
     try:

@@ -1,12 +1,12 @@
 from collections.abc import AsyncIterator
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import FileResponse
+from fastapi import APIRouter, HTTPException, Request, status
+from fastapi.responses import FileResponse, Response
 from fastapi.sse import EventSourceResponse, ServerSentEvent
 
-from app.api.schemas import ChatRequest, MetaResponse, TranscriptionResponse, WarmResponse
-from app.core import pipeline, stt
+from app.api.schemas import ChatRequest, MetaResponse, SpeechRequest, TranscriptionResponse, WarmResponse
+from app.core import pipeline, stt, tts
 
 INDEX = Path(__file__).resolve().parents[2] / "web" / "index.html"
 
@@ -43,4 +43,13 @@ async def post_stt(request: Request) -> dict:
     try:
         return {"text": await stt.transcribe(request.app.state.http, audio, content_type)}
     except Exception as e:
-        raise HTTPException(status_code=502, detail=f"{type(e).__name__}: {e}") from e
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, detail=str(e)) from e
+
+
+@router.post("/api/tts")
+async def post_tts(req: SpeechRequest, request: Request) -> Response:
+    try:
+        wav = await tts.synthesize(request.app.state.http, req.text)
+        return Response(wav, media_type="audio/wav")
+    except Exception as e:
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, detail=str(e)) from e
