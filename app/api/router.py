@@ -7,7 +7,6 @@ from fastapi.sse import EventSourceResponse, ServerSentEvent
 
 from app.api.schemas import ChatRequest, MetaResponse, TranscriptionResponse
 from app.core import pipeline
-from app.core.config import settings
 
 INDEX = Path(__file__).resolve().parents[2] / "web" / "index.html"
 
@@ -44,8 +43,6 @@ async def post_chat(req: ChatRequest, request: Request) -> AsyncIterator[ServerS
 
 @router.post("/api/stt", response_model=TranscriptionResponse)
 async def post_stt(request: Request) -> dict:
-    if not settings.stt_on:
-        raise HTTPException(status_code=503, detail="STT_URL is not set")
     audio = await request.body()
     ctype = (request.headers.get("content-type") or "audio/webm").split(";")[0].strip()
     try:

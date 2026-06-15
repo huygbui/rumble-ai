@@ -1,18 +1,10 @@
-from pydantic import field_validator
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 DEFAULT_CHAT_SYSTEM = (
     "You are a friendly Australian helper for kids. Speak simply and warmly, "
     "in one or two short sentences."
 )
-
-
-def strip_url(value: str | None) -> str:
-    return (value or "").rstrip("/")
-
-
-def blank_flag_is_false(value: object) -> object:
-    return False if value in (None, "") else value
 
 
 class AppSettings(BaseSettings):
@@ -22,12 +14,12 @@ class AppSettings(BaseSettings):
         frozen=True,
     )
 
-    llm_url: str = ""
+    llm_url: str = Field(min_length=1)
     llm_model: str = "Qwen/Qwen3.5-4B"
     chat_max_tokens: int = 256
     chat_system: str = DEFAULT_CHAT_SYSTEM
 
-    tts_url: str = ""
+    tts_url: str = Field(min_length=1)
     tts_model: str = "omnivoice"
     tts_out_dir: str = "out"
     play: bool = False
@@ -41,14 +33,14 @@ class AppSettings(BaseSettings):
     say_gap_ms: int = 90
     say_fade_ms: int = 8
 
-    stt_url: str = ""
+    stt_url: str = Field(min_length=1)
     stt_model: str = "Qwen/Qwen3-ASR-0.6B"
     warm_budget: int = 300
 
     @field_validator("llm_url", "tts_url", "stt_url", mode="before")
     @classmethod
     def _strip_url(cls, value: str | None) -> str:
-        return strip_url(value)
+        return (value or "").rstrip("/")
 
     @field_validator("tts_model")
     @classmethod
@@ -58,7 +50,7 @@ class AppSettings(BaseSettings):
     @field_validator("play", "compare", mode="before")
     @classmethod
     def _blank_flag_is_false(cls, value: object) -> object:
-        return blank_flag_is_false(value)
+        return False if value in (None, "") else value
 
     @property
     def llm_chat_url(self) -> str:

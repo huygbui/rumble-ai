@@ -7,8 +7,7 @@ requires-python = ">=3.14"
 dependencies = [
     "modal>=1.5.0",
     "httpx>=0.28",
-    "fastapi>=0.135",
-    "uvicorn>=0.34",
+    "fastapi[standard]>=0.135",
     "pydantic>=2",
     "pydantic-settings>=2.14.1",
 ]
