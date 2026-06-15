@@ -13,7 +13,10 @@ wheels/
 *.wav
 *.mp3
 out/*
-!out/MANIFEST.txt   # keep the demo-clip manifest tracked; the audio itself stays ignored
+# keep the demo-clip manifest tracked; the audio itself stays ignored
+!out/MANIFEST.txt
+# required runtime asset (TTS clone anchor), not scratch audio
+!assets/voice_anchor.wav
 
 # macOS
 .DS_Store

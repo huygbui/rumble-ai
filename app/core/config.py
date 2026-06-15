@@ -1,5 +1,17 @@
+from pathlib import Path
+
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+# Fixed clone anchor: one voice every clause clones so timbre stays constant across a
+# reply. Generated once via the design path (female, child, high pitch) — see
+# out/voice_candidates.py and docs/voice-design.md.
+DEFAULT_ANCHOR = REPO_ROOT / "assets" / "voice_anchor.wav"
+DEFAULT_ANCHOR_TEXT = (
+    "Hi there! I'm really glad you're here. "
+    "Do you want to hear a fun story, or should we play a guessing game first?"
+)
 
 DEFAULT_CHAT_SYSTEM = (
     "You are a friendly Australian helper for kids. Speak simply and warmly, "
@@ -42,9 +54,14 @@ class AppSettings(BaseSettings):
     chat_system: str = DEFAULT_CHAT_SYSTEM
 
     tts_url: str = ""
-    # Accent/dialect attributes only apply to English/Chinese; leave empty (or clone)
-    # for other languages. See docs/voice-design.md.
-    omni_instructions: str = "female, child, high pitch, australian accent"
+    # Clone anchor (preferred): every clause clones this one clip so the voice stays
+    # fixed across a reply. Text-prompt *design* re-mints a speaker per clause, which
+    # drifts mid-reply. Set omni_ref_audio empty to fall back to the design path below.
+    omni_ref_audio: str = str(DEFAULT_ANCHOR)  # file path, public URL, or data: URI
+    omni_ref_text: str = DEFAULT_ANCHOR_TEXT  # transcript of omni_ref_audio
+    # Design fallback (used only when omni_ref_audio is unset/unresolvable). Accent/
+    # dialect attributes only apply to English/Chinese. See docs/voice-design.md.
+    omni_instructions: str = "female, child, high pitch"
     omni_seed: int = 58842
     clause_max_len: int = 140
 
