@@ -10,4 +10,5 @@ dependencies = [
     "fastapi>=0.135",
     "uvicorn>=0.34",
     "pydantic>=2",
+    "pydantic-settings>=2.14.1",
 ]

@@ -30,7 +30,7 @@ def main() -> None:
     text = (text or "G'day! Want to hear a quick story? It begins on a windy hill by the sea.").strip()
 
     chunks = speech.split_clauses(text)
-    print(f"endpoint={speech.URL}  model={speech.MODEL}  clauses={len(chunks)}\n")
+    print(f"endpoint={speech.SPEECH_URL}  model={speech.MODEL}  clauses={len(chunks)}\n")
     for i, c in enumerate(chunks):
         print(f"  clause[{i}] ({len(c)} chars): {c!r}")
     print()

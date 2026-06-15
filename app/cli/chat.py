@@ -6,7 +6,7 @@ from app.core import dialogue, speech
 
 def main() -> None:
     print(f"LLM={dialogue.LLM_CHAT_URL or '(unset)'}  model={dialogue.LLM_MODEL}")
-    print(f"TTS={'on -> ' + speech.URL if dialogue.TTS_ON else 'OFF (text-only; set TTS_URL to speak)'}\n")
+    print(f"TTS={'on -> ' + speech.SPEECH_URL if dialogue.TTS_ON else 'OFF (text-only; set TTS_URL to speak)'}\n")
 
     if os.environ.get("CHAT_REPL") not in (None, "", "0"):
         messages = [{"role": "system", "content": dialogue.SYSTEM}]

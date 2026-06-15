@@ -12,8 +12,8 @@ import httpx
 
 from app.core.config import settings
 
-BASE = settings.tts_base
-URL = settings.tts_url
+TTS_URL = settings.tts_url
+SPEECH_URL = settings.tts_speech_url
 MODEL = settings.tts_model
 OUT_DIR = settings.tts_out_dir
 PLAY = settings.play
@@ -46,10 +46,10 @@ def make_payload(text: str) -> dict:
 
 
 def synth(text: str):
-    if not BASE:
+    if not TTS_URL:
         raise SystemExit("set TTS_URL to synthesize (only STITCH_ONLY works without it)")
     t0 = time.time()
-    r = CLIENT.post(URL, json=make_payload(text))
+    r = CLIENT.post(SPEECH_URL, json=make_payload(text))
     r.raise_for_status()
     return time.time() - t0, r.content
 
@@ -243,7 +243,6 @@ def stream(chunks: list[str]) -> None:
 
 __all__ = [
     "ABBREV",
-    "BASE",
     "CLIENT",
     "COMPARE",
     "FADE_MS",
@@ -256,8 +255,9 @@ __all__ = [
     "OMNI_SEED",
     "OUT_DIR",
     "PLAY",
+    "SPEECH_URL",
     "SILENCE_THR",
-    "URL",
+    "TTS_URL",
     "VOICE",
     "make_payload",
     "split_clauses",

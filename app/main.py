@@ -32,16 +32,16 @@ def main() -> None:
     print(
         "STT = "
         + (
-            pipeline.STT_BASE + "  model=" + pipeline.STT_MODEL
+            pipeline.STT_URL + "  model=" + pipeline.STT_MODEL
             if pipeline.STT_ON
             else "OFF (mic disabled; export STT_URL)"
         )
     )
-    print(f"LLM = {dialogue.LLM_BASE or '(unset -- export LLM_URL)'}  model={dialogue.LLM_MODEL}")
+    print(f"LLM = {dialogue.LLM_URL or '(unset -- export LLM_URL)'}  model={dialogue.LLM_MODEL}")
     print(
         "TTS = "
         + (
-            speech.BASE + "  model=" + speech.MODEL
+            speech.TTS_URL + "  model=" + speech.MODEL
             if pipeline.TTS_ON
             else "OFF (text-only; export TTS_URL)"
         )

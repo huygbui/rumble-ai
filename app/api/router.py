@@ -37,7 +37,7 @@ async def warm(request: Request) -> AsyncIterator[ServerSentEvent]:
 async def post_chat(req: ChatRequest, request: Request) -> AsyncIterator[ServerSentEvent]:
     client = request.app.state.http
     messages = [m.model_dump() for m in req.messages]
-    if not dialogue.LLM_BASE:
+    if not dialogue.LLM_URL:
         yield ServerSentEvent(
             event="error",
             data={"message": "LLM_URL is not set -- export it before starting the web app"},

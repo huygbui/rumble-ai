@@ -12,7 +12,7 @@ import httpx
 from app.core import dialogue, speech
 from app.core.config import settings
 
-STT_BASE = settings.stt_base
+STT_URL = settings.stt_url
 STT_MODEL = settings.stt_model
 WARM_BUDGET = settings.warm_budget
 TTS_ON = settings.tts_on
@@ -36,12 +36,12 @@ class StreamEvent:
 
 def meta_payload() -> dict[str, Any]:
     return {
-        "llm": dialogue.LLM_BASE or None,
+        "llm": dialogue.LLM_URL or None,
         "model": dialogue.LLM_MODEL,
-        "tts": speech.BASE or None,
+        "tts": speech.TTS_URL or None,
         "tts_model": speech.MODEL,
         "tts_on": TTS_ON,
-        "stt": STT_BASE or None,
+        "stt": STT_URL or None,
         "stt_model": STT_MODEL,
         "stt_on": STT_ON,
     }
@@ -137,7 +137,7 @@ async def _voice_turn(client, clauses, t0) -> AsyncIterator[StreamEvent]:
 
 async def synth(client: httpx.AsyncClient, text: str) -> tuple[float, bytes]:
     t0 = time.time()
-    r = await client.post(speech.URL, json=speech.make_payload(text))
+    r = await client.post(speech.SPEECH_URL, json=speech.make_payload(text))
     r.raise_for_status()
     return time.time() - t0, r.content
 
@@ -156,11 +156,11 @@ def _save_stitched(wavs: list[tuple[int, bytes]]) -> None:
 def _stages() -> list[tuple[str, str]]:
     stages = []
     if STT_ON:
-        stages.append(("stt", STT_BASE))
-    if dialogue.LLM_BASE:
-        stages.append(("llm", dialogue.LLM_BASE))
+        stages.append(("stt", STT_URL))
+    if dialogue.LLM_URL:
+        stages.append(("llm", dialogue.LLM_URL))
     if TTS_ON:
-        stages.append(("tts", speech.BASE))
+        stages.append(("tts", speech.TTS_URL))
     return stages
 
 
@@ -202,7 +202,7 @@ async def transcribe(client: httpx.AsyncClient, audio: bytes, ctype: str, attemp
     last = ""
     for _ in range(attempts):
         r = await client.post(
-            f"{STT_BASE}/v1/audio/transcriptions",
+            f"{STT_URL}/v1/audio/transcriptions",
             files={"file": (f"speech.{ext}", audio, ctype)},
             data={"model": STT_MODEL},
         )

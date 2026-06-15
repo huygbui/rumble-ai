@@ -11,13 +11,13 @@ import httpx
 from app.core import speech
 from app.core.config import settings
 
-LLM_BASE = settings.llm_base
+LLM_URL = settings.llm_url
 LLM_CHAT_URL = settings.llm_chat_url
 LLM_MODEL = settings.llm_model
-MAX_TOKENS = settings.max_tokens
+CHAT_MAX_TOKENS = settings.chat_max_tokens
 SYSTEM = settings.chat_system
 PLAY = settings.play
-TTS_ON = bool(speech.BASE)
+TTS_ON = bool(speech.TTS_URL)
 
 LLM_CLIENT = httpx.Client(timeout=600, limits=httpx.Limits(max_keepalive_connections=4))
 
@@ -97,7 +97,7 @@ def llm_payload(messages: list[dict]) -> dict:
         "top_p": 0.8,
         "top_k": 20,
         "presence_penalty": 1.5,
-        "max_tokens": MAX_TOKENS,
+        "max_tokens": CHAT_MAX_TOKENS,
         "chat_template_kwargs": {"enable_thinking": False},
         "stream": True,
     }
@@ -124,7 +124,7 @@ def llm_stream(messages):
 
 
 def converse(messages) -> str:
-    if not LLM_BASE:
+    if not LLM_URL:
         raise SystemExit("set LLM_URL to the Qwen3.5-4B endpoint (see llm/qwen3_5_4b.py)")
 
     clause_q: queue.Queue = queue.Queue()
@@ -222,11 +222,11 @@ def converse(messages) -> str:
 
 __all__ = [
     "ClauseStreamer",
-    "LLM_BASE",
+    "CHAT_MAX_TOKENS",
     "LLM_CHAT_URL",
     "LLM_CLIENT",
     "LLM_MODEL",
-    "MAX_TOKENS",
+    "LLM_URL",
     "PLAY",
     "SYSTEM",
     "TTS_ON",
