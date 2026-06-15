@@ -9,23 +9,64 @@ import time
 import wave
 
 import httpx
+from pydantic import field_validator
 
-from app.core.config import settings
+from app.core.settings import AppSettings, blank_flag_is_false, strip_url
 
-TTS_URL = settings.tts_url
-SPEECH_URL = settings.tts_speech_url
-MODEL = settings.tts_model
-OUT_DIR = settings.tts_out_dir
-PLAY = settings.play
-COMPARE = settings.compare
-OMNI_INSTRUCTIONS = settings.omni_instructions
-OMNI_SEED = settings.omni_seed
-VOICE = settings.tts_voice
-MAX_LEN = settings.say_max_len
-FIRST_MAX = settings.say_first_max
-MIN_LEN = settings.say_min_len
-GAP_MS = settings.say_gap_ms
-FADE_MS = settings.say_fade_ms
+
+class SpeechSettings(AppSettings):
+    tts_url: str = ""
+    tts_model: str = "omnivoice"
+    tts_out_dir: str = "out"
+    play: bool = False
+    compare: bool = False
+    omni_instructions: str = "female, child, high pitch, australian accent"
+    omni_seed: int = 58842
+    tts_voice: str = "bench"
+    say_max_len: int = 140
+    say_first_max: int = 60
+    say_min_len: int = 12
+    say_gap_ms: int = 90
+    say_fade_ms: int = 8
+
+    @field_validator("tts_url", mode="before")
+    @classmethod
+    def _strip_url(cls, value: str | None) -> str:
+        return strip_url(value)
+
+    @field_validator("tts_model")
+    @classmethod
+    def _normalize_tts_model(cls, value: str) -> str:
+        return value.lower()
+
+    @field_validator("play", "compare", mode="before")
+    @classmethod
+    def _blank_flag_is_false(cls, value: object) -> object:
+        return blank_flag_is_false(value)
+
+    @property
+    def tts_speech_url(self) -> str:
+        if not self.tts_url:
+            return ""
+        return f"{self.tts_url}/v1/audio/speech"
+
+
+speech_settings = SpeechSettings()
+
+TTS_URL = speech_settings.tts_url
+SPEECH_URL = speech_settings.tts_speech_url
+MODEL = speech_settings.tts_model
+OUT_DIR = speech_settings.tts_out_dir
+PLAY = speech_settings.play
+COMPARE = speech_settings.compare
+OMNI_INSTRUCTIONS = speech_settings.omni_instructions
+OMNI_SEED = speech_settings.omni_seed
+VOICE = speech_settings.tts_voice
+MAX_LEN = speech_settings.say_max_len
+FIRST_MAX = speech_settings.say_first_max
+MIN_LEN = speech_settings.say_min_len
+GAP_MS = speech_settings.say_gap_ms
+FADE_MS = speech_settings.say_fade_ms
 SILENCE_THR = 400
 
 CLIENT = httpx.Client(timeout=600, limits=httpx.Limits(max_keepalive_connections=8))

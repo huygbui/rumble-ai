@@ -7,16 +7,43 @@ import threading
 import time
 
 import httpx
+from pydantic import field_validator
 
 from app.core import speech
-from app.core.config import settings
+from app.core.settings import AppSettings, strip_url
 
-LLM_URL = settings.llm_url
-LLM_CHAT_URL = settings.llm_chat_url
-LLM_MODEL = settings.llm_model
-CHAT_MAX_TOKENS = settings.chat_max_tokens
-SYSTEM = settings.chat_system
-PLAY = settings.play
+DEFAULT_CHAT_SYSTEM = (
+    "You are a friendly Australian helper for kids. Speak simply and warmly, "
+    "in one or two short sentences."
+)
+
+
+class DialogueSettings(AppSettings):
+    llm_url: str = ""
+    llm_model: str = "Qwen/Qwen3.5-4B"
+    chat_max_tokens: int = 256
+    chat_system: str = DEFAULT_CHAT_SYSTEM
+
+    @field_validator("llm_url", mode="before")
+    @classmethod
+    def _strip_url(cls, value: str | None) -> str:
+        return strip_url(value)
+
+    @property
+    def llm_chat_url(self) -> str:
+        if not self.llm_url:
+            return ""
+        return f"{self.llm_url}/v1/chat/completions"
+
+
+dialogue_settings = DialogueSettings()
+
+LLM_URL = dialogue_settings.llm_url
+LLM_CHAT_URL = dialogue_settings.llm_chat_url
+LLM_MODEL = dialogue_settings.llm_model
+CHAT_MAX_TOKENS = dialogue_settings.chat_max_tokens
+SYSTEM = dialogue_settings.chat_system
+PLAY = speech.PLAY
 TTS_ON = bool(speech.TTS_URL)
 
 LLM_CLIENT = httpx.Client(timeout=600, limits=httpx.Limits(max_keepalive_connections=4))

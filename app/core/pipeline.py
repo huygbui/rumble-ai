@@ -8,15 +8,30 @@ from pathlib import Path
 from typing import Any
 
 import httpx
+from pydantic import field_validator
 
 from app.core import dialogue, speech
-from app.core.config import settings
+from app.core.settings import AppSettings, strip_url
 
-STT_URL = settings.stt_url
-STT_MODEL = settings.stt_model
-WARM_BUDGET = settings.warm_budget
-TTS_ON = settings.tts_on
-STT_ON = settings.stt_on
+
+class PipelineSettings(AppSettings):
+    stt_url: str = ""
+    stt_model: str = "Qwen/Qwen3-ASR-0.6B"
+    warm_budget: int = 300
+
+    @field_validator("stt_url", mode="before")
+    @classmethod
+    def _strip_url(cls, value: str | None) -> str:
+        return strip_url(value)
+
+
+pipeline_settings = PipelineSettings()
+
+STT_URL = pipeline_settings.stt_url
+STT_MODEL = pipeline_settings.stt_model
+WARM_BUDGET = pipeline_settings.warm_budget
+TTS_ON = bool(speech.TTS_URL)
+STT_ON = bool(STT_URL)
 
 STT_EXT = {
     "audio/webm": "webm",
