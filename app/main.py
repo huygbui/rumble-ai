@@ -13,10 +13,5 @@ async def lifespan(app: FastAPI):
         yield
 
 
-def create_app() -> FastAPI:
-    app = FastAPI(lifespan=lifespan)
-    app.include_router(router)
-    return app
-
-
-app = create_app()
+app = FastAPI(lifespan=lifespan)
+app.include_router(router)

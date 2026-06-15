@@ -17,7 +17,7 @@ one `client.py` drives any of them via `TTS_MODEL`.
 
 ```
 app/                  # FastAPI app package
-  main.py             # create_app(), lifespan, app; run with `fastapi dev app/main.py`
+  main.py             # FastAPI app + lifespan; run with `fastapi dev app/main.py`
   api/                # HTTP boundary: routers and Pydantic request/response schemas
   core/               # runtime helpers: config, llm, tts, text chunking, STT, warm-up
   cli/                # CLI entrypoints: `python -m app.cli.say`, `python -m app.cli.chat`
