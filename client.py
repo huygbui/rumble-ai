@@ -33,7 +33,7 @@ import mimetypes
 import os
 import wave
 
-import requests
+import httpx
 
 BASE_URL = os.environ["TTS_URL"].rstrip("/")  # printed by `modal deploy`
 SPEECH_URL = f"{BASE_URL}/v1/audio/speech"
@@ -57,8 +57,8 @@ def _wav_dur(b: bytes) -> str:
 
 
 def synthesize(label: str, payload: dict, out_name: str) -> None:
-    resp = requests.post(SPEECH_URL, json=payload, timeout=600)
-    if not resp.ok:
+    resp = httpx.post(SPEECH_URL, json=payload, timeout=600)
+    if resp.is_error:
         # Surface the server's error body (these endpoints return JSON errors, e.g. a bad
         # preset voice or a missing ref) instead of an opaque status code.
         raise SystemExit(f"[{label}] {resp.status_code}: {resp.text[:500]}")
@@ -87,7 +87,7 @@ def register_voice(name: str, audio_path: str, ref_text: str) -> None:
     # synthesize with voice=<name>. Re-registering the same name overwrites it.
     mime = mimetypes.guess_type(audio_path)[0] or "audio/wav"
     with open(audio_path, "rb") as f:
-        resp = requests.post(
+        resp = httpx.post(
             VOICES_URL,
             data={
                 "name": name,

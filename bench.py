@@ -23,7 +23,7 @@ import statistics
 import time
 import wave
 
-import requests
+import httpx
 
 BASE = os.environ["TTS_URL"].rstrip("/")
 URL = f"{BASE}/v1/audio/speech"
@@ -99,7 +99,7 @@ def setup() -> None:
         )
     mime = mimetypes.guess_type(ref_audio)[0] or "audio/wav"
     with open(ref_audio, "rb") as f:
-        r = requests.post(
+        r = httpx.post(
             VOICES_URL,
             data={"name": FISH_VOICE, "consent": "I consent.", "ref_text": ref_text},
             files={"audio_sample": (os.path.basename(ref_audio), f, mime)},
@@ -120,16 +120,16 @@ def synth(text, stream=False, timeout=600):
     payload = make_payload(text, stream)
     t0 = time.time()
     if stream:
-        r = requests.post(URL, json=payload, stream=True, timeout=timeout)
-        r.raise_for_status()
-        ttfb, buf = None, bytearray()
-        for c in r.iter_content(8192):
-            if c:
-                if ttfb is None:
-                    ttfb = time.time() - t0
-                buf += c
+        with httpx.stream("POST", URL, json=payload, timeout=timeout) as r:
+            r.raise_for_status()
+            ttfb, buf = None, bytearray()
+            for c in r.iter_bytes(8192):
+                if c:
+                    if ttfb is None:
+                        ttfb = time.time() - t0
+                    buf += c
         return time.time() - t0, ttfb, bytes(buf)
-    r = requests.post(URL, json=payload, timeout=timeout)
+    r = httpx.post(URL, json=payload, timeout=timeout)
     r.raise_for_status()
     return time.time() - t0, None, r.content
 

@@ -88,6 +88,24 @@
 <script>
 const $ = id => document.getElementById(id);
 const fmt = s => s == null ? "–" : s.toFixed(2) + "s";
+
+// Read an SSE response body, calling onEvent(event, data) per `event:/data:` frame.
+async function readSSE(res, onEvent) {
+  const reader = res.body.getReader(), dec = new TextDecoder();
+  let buf = "";
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buf += dec.decode(value, { stream: true });
+    let i;
+    while ((i = buf.indexOf("\n\n")) >= 0) {
+      const block = buf.slice(0, i); buf = buf.slice(i + 2);
+      const ev = (block.match(/^event: (.*)$/m) || [])[1];
+      const data = JSON.parse((block.match(/^data: (.*)$/m) || [])[1] || "{}");
+      if (ev) await onEvent(ev, data);   // sequential -> clause audio stays in order
+    }
+  }
+}
 const GAP = 0.09;                       // ~SAY_GAP_MS: one short pause between clauses
 let ttsOn = true, sttOn = false, history = [], busy = false;
 let audioCtx = null, playhead = 0;      // Web Audio cursor -> gapless in-order playback
@@ -128,21 +146,10 @@ async function warm() {
   $("note").textContent = "warming up… ~20–40s from snapshot (a minute or two on the very first build).";
   try {
     const res = await fetch("/api/warm");
-    const reader = res.body.getReader(), dec = new TextDecoder();
-    let buf = "";
-    for (;;) {
-      const { value, done } = await reader.read();
-      if (done) break;
-      buf += dec.decode(value, { stream: true });
-      let i;
-      while ((i = buf.indexOf("\n\n")) >= 0) {
-        const block = buf.slice(0, i); buf = buf.slice(i + 2);
-        const ev = (block.match(/^event: (.*)$/m) || [])[1];
-        const data = JSON.parse((block.match(/^data: (.*)$/m) || [])[1] || "{}");
-        if (ev === "stage") { setDot(data.name, data.status); R[data.name] = data.status === "ready"; updateReady(); }
-        else if (ev === "done") { $("note").textContent = data.ready ? "all warm — go ahead." : "some stages didn't warm; tap warm up to retry."; }
-      }
-    }
+    await readSSE(res, (ev, data) => {
+      if (ev === "stage") { setDot(data.name, data.status); R[data.name] = data.status === "ready"; updateReady(); }
+      else if (ev === "done") { $("note").textContent = data.ready ? "all warm — go ahead." : "some stages didn't warm; tap warm up to retry."; }
+    });
   } catch (e) { $("note").textContent = "warm error: " + e.message; }
   wb.disabled = false; wb.textContent = ready ? "re-warm" : "warm up";
 }
@@ -239,58 +246,46 @@ async function send(text) {
     body: JSON.stringify({ messages: history }),
   });
 
-  const reader = res.body.getReader(), dec = new TextDecoder();
-  let buf = "";
-  for (;;) {
-    const { value, done } = await reader.read();
-    if (done) break;
-    buf += dec.decode(value, { stream: true });
-    let i;
-    while ((i = buf.indexOf("\n\n")) >= 0) {
-      const block = buf.slice(0, i); buf = buf.slice(i + 2);
-      const ev = (block.match(/^event: (.*)$/m) || [])[1];
-      const data = JSON.parse((block.match(/^data: (.*)$/m) || [])[1] || "{}");
-
-      if (ev === "ttft") {
-        $("m-ttft").textContent = fmt(data.t);
-      } else if (ev === "clause") {
-        if (firstReady === null) firstReady = data.t_ready;
-        const span = document.createElement("span");
-        span.className = "clause";
-        span.textContent = (bot.textContent ? " " : "") + data.text;
-        bot.appendChild(span); spans[data.i] = span;
-        bot.scrollIntoView({ block: "end" });
-        if (ttsOn && data.wav_b64) {
-          const startAt = await playClause(data.wav_b64);
-          const delayMs = Math.max(0, (startAt - audioCtx.currentTime) * 1000);
-          setTimeout(() => span.classList.add("spoken"), delayMs);  // light up when it actually speaks
-          if (firstSound === null) {
-            firstSound = (performance.now() - t0) + delayMs;
-            $("m-first").textContent = fmt(firstSound / 1000);
-          }
-        } else {
-          span.classList.add("spoken");
-          if (firstSound === null) { firstSound = performance.now() - t0; $("m-first").textContent = fmt(firstSound / 1000); }
+  await readSSE(res, async (ev, data) => {
+    if (ev === "ttft") {
+      $("m-ttft").textContent = fmt(data.t);
+    } else if (ev === "clause") {
+      if (firstReady === null) firstReady = data.t_ready;
+      const span = document.createElement("span");
+      span.className = "clause";
+      span.textContent = (bot.textContent ? " " : "") + data.text;
+      bot.appendChild(span); spans[data.i] = span;
+      bot.scrollIntoView({ block: "end" });
+      if (ttsOn && data.wav_b64) {
+        const startAt = await playClause(data.wav_b64);
+        const delayMs = Math.max(0, (startAt - audioCtx.currentTime) * 1000);
+        setTimeout(() => span.classList.add("spoken"), delayMs);  // light up when it actually speaks
+        if (firstSound === null) {
+          firstSound = (performance.now() - t0) + delayMs;
+          $("m-first").textContent = fmt(firstSound / 1000);
         }
-      } else if (ev === "done") {
-        history.push({ role: "assistant", content: data.full_reply });
-        $("m-full").textContent = fmt(data.wall);
-        if (firstReady !== null) {
-          const head = data.wall - firstReady;          // generation+synth still ran this long after first audio
-          $("m-head").textContent = fmt(head);
-          $("note").textContent = ttsOn
-            ? `You started hearing audio ~${head.toFixed(1)}s before the full reply was ready.`
-            : `First clause was ready ~${head.toFixed(1)}s before the full reply.`;
-        }
-      } else if (ev === "error") {
-        const warn = document.createElement("span");          // append -- don't wipe spoken clauses
-        warn.className = "clause spoken";
-        warn.textContent = (bot.textContent ? " " : "") + "⚠ " + data.message;
-        bot.appendChild(warn);
-        $("note").textContent = data.message;
+      } else {
+        span.classList.add("spoken");
+        if (firstSound === null) { firstSound = performance.now() - t0; $("m-first").textContent = fmt(firstSound / 1000); }
       }
+    } else if (ev === "done") {
+      history.push({ role: "assistant", content: data.full_reply });
+      $("m-full").textContent = fmt(data.wall);
+      if (firstReady !== null) {
+        const head = data.wall - firstReady;          // generation+synth still ran this long after first audio
+        $("m-head").textContent = fmt(head);
+        $("note").textContent = ttsOn
+          ? `You started hearing audio ~${head.toFixed(1)}s before the full reply was ready.`
+          : `First clause was ready ~${head.toFixed(1)}s before the full reply.`;
+      }
+    } else if (ev === "error") {
+      const warn = document.createElement("span");          // append -- don't wipe spoken clauses
+      warn.className = "clause spoken";
+      warn.textContent = (bot.textContent ? " " : "") + "⚠ " + data.message;
+      bot.appendChild(warn);
+      $("note").textContent = data.message;
     }
-  }
+  });
   busy = false; refreshGates(); $("input").focus();
 }
 

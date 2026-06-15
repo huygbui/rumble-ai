@@ -405,11 +405,11 @@ def main():
         print(f"  curl -s {url}/v1/audio/transcriptions -F model={MODEL_NAME} -F file=@your_audio.wav")
         return
 
-    # requests is a local (client-side) dep; local_entrypoint runs on YOUR machine, not the GPU.
-    import requests
+    # httpx is a local (client-side) dep; local_entrypoint runs on YOUR machine, not the GPU.
+    import httpx
 
     if sample.startswith(("http://", "https://")):
-        audio = requests.get(sample, timeout=2 * MINUTES).content
+        audio = httpx.get(sample, timeout=2 * MINUTES).content
         name = sample.rsplit("/", 1)[-1] or "audio.wav"
     else:
         with open(sample, "rb") as f:
@@ -417,7 +417,7 @@ def main():
         name = os.path.basename(sample)
 
     print(f"Transcribing {sample} ({len(audio)} bytes)...")
-    resp = requests.post(
+    resp = httpx.post(
         f"{url}/v1/audio/transcriptions",
         files={"file": (name, audio, "audio/wav")},
         data={"model": MODEL_NAME},  # language is auto-detected; add "language": "en" to force English

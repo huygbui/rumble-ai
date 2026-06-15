@@ -25,8 +25,7 @@ import time
 import io
 import wave
 
-import requests
-from requests.adapters import HTTPAdapter
+import httpx
 
 BASE = os.environ.get("TTS_URL", "").rstrip("/")  # required for synthesis; NOT for STITCH_ONLY
 URL = f"{BASE}/v1/audio/speech"
@@ -45,9 +44,7 @@ GAP_MS = int(os.environ.get("SAY_GAP_MS", "90"))    # ONE controlled pause betwe
 FADE_MS = int(os.environ.get("SAY_FADE_MS", "8"))   # edge fade in/out -> no boundary click
 SILENCE_THR = 400  # |s16| <= this counts as silence when trimming clip edges
 
-SESSION = requests.Session()  # reuse one keep-alive connection across clauses
-SESSION.mount("https://", HTTPAdapter(pool_maxsize=8, max_retries=1))
-SESSION.mount("http://", HTTPAdapter(pool_maxsize=8, max_retries=1))
+CLIENT = httpx.Client(timeout=600, limits=httpx.Limits(max_keepalive_connections=8))  # keep-alive across clauses
 
 
 def make_payload(text: str) -> dict:
@@ -63,7 +60,7 @@ def synth(text: str):
     if not BASE:
         raise SystemExit("set TTS_URL to synthesize (only STITCH_ONLY works without it)")
     t0 = time.time()
-    r = SESSION.post(URL, json=make_payload(text), timeout=600)
+    r = CLIENT.post(URL, json=make_payload(text))
     r.raise_for_status()
     return time.time() - t0, r.content
 

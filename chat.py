@@ -32,9 +32,9 @@ import sys
 import threading
 import time
 
-import requests
+import httpx
 
-import say  # reuse synth(), stitch(), wav_dur(), OUT_DIR, ABBREV, the pooled TTS Session, etc.
+import say  # reuse synth(), stitch(), wav_dur(), OUT_DIR, ABBREV, the pooled TTS client, etc.
 
 # --- LLM endpoint (plain vLLM OpenAI-compatible; see llm/qwen3_5_4b.py) ----------------
 LLM_BASE = os.environ.get("LLM_URL", "").rstrip("/")
@@ -50,10 +50,8 @@ SYSTEM = os.environ.get(
 PLAY = os.environ.get("PLAY") not in (None, "", "0")
 TTS_ON = bool(say.BASE)  # if TTS_URL is unset, run text-only (stream + print, no synth/GPU)
 
-# One pooled keep-alive connection to the LLM (separate host from TTS -> its own Session).
-LLM_SESSION = requests.Session()
-LLM_SESSION.mount("https://", requests.adapters.HTTPAdapter(pool_maxsize=4, max_retries=1))
-LLM_SESSION.mount("http://", requests.adapters.HTTPAdapter(pool_maxsize=4, max_retries=1))
+# One pooled keep-alive client to the LLM (separate host from TTS -> its own client).
+LLM_CLIENT = httpx.Client(timeout=600, limits=httpx.Limits(max_keepalive_connections=4))
 
 
 # --- Incremental clause splitter -------------------------------------------------------
@@ -133,10 +131,10 @@ class ClauseStreamer:
 
 
 # --- LLM streaming ---------------------------------------------------------------------
-def llm_stream(messages):
-    # Yields content deltas from the OpenAI-compatible SSE stream. enable_thinking=false +
-    # Qwen3.5's recommended non-thinking sampling (from llm/qwen3_5_4b.py) -> fast, no CoT.
-    payload = {
+# Qwen3.5's recommended non-thinking sampling (from llm/qwen3_5_4b.py): enable_thinking=false
+# -> fast, no CoT. Pure (no transport), so the CLI and web.py's async client share both helpers.
+def llm_payload(messages: list[dict]) -> dict:
+    return {
         "model": LLM_MODEL,
         "messages": messages,
         "temperature": 0.7,
@@ -147,21 +145,28 @@ def llm_stream(messages):
         "chat_template_kwargs": {"enable_thinking": False},
         "stream": True,
     }
-    r = LLM_SESSION.post(LLM_CHAT_URL, json=payload, stream=True, timeout=600)
-    r.raise_for_status()
-    for line in r.iter_lines(decode_unicode=True):
-        if not line or not line.startswith("data:"):
-            continue
-        data = line[5:].strip()
-        if data == "[DONE]":
-            break
-        try:
-            delta = json.loads(data)["choices"][0].get("delta", {})
-        except (json.JSONDecodeError, KeyError, IndexError):
-            continue
-        chunk = delta.get("content") or ""
-        if chunk:
-            yield chunk
+
+
+def parse_sse_delta(line: str) -> str | None:
+    # One OpenAI SSE line -> a content delta, or None to skip ([DONE], keep-alives, non-content).
+    if not line.startswith("data:"):
+        return None
+    data = line[5:].strip()
+    if data == "[DONE]":
+        return None
+    try:
+        return json.loads(data)["choices"][0].get("delta", {}).get("content") or None
+    except (json.JSONDecodeError, KeyError, IndexError):
+        return None
+
+
+def llm_stream(messages):
+    # Yields content deltas from the OpenAI-compatible SSE stream.
+    with LLM_CLIENT.stream("POST", LLM_CHAT_URL, json=llm_payload(messages)) as r:
+        r.raise_for_status()
+        for line in r.iter_lines():
+            if delta := parse_sse_delta(line):
+                yield delta
 
 
 # --- One conversational turn -----------------------------------------------------------
