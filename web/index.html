@@ -1,0 +1,191 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>rumble · chat + voice</title>
+<style>
+  /* Deliberately bare: grayscale, system type, hairlines. Meaning is carried by weight and
+     opacity, not color -- the one functional cue is clauses dimming until their audio plays. */
+  :root { color-scheme: light; }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 15px/1.6 system-ui, sans-serif; color: #111; background: #fff; }
+  main { max-width: 620px; margin: 0 auto; padding: 36px 20px 120px; }
+  h1 { font-size: inherit; font-weight: 600; margin: 0; }
+  .sub { color: #999; margin: 2px 0 22px; }
+  .sub b { color: #555; font-weight: 600; }
+
+  details { margin: 0 0 22px; }
+  summary { cursor: pointer; color: #999; }
+  textarea { width: 100%; margin-top: 8px; padding: 8px 10px; font: inherit;
+    color: #111; border: 1px solid #e2e2e2; background: #fafafa; resize: vertical; min-height: 52px; }
+
+  /* metrics: hierarchy from color, not size */
+  .stats { display: flex; flex-wrap: wrap; gap: 22px; padding: 14px 0; border-top: 1px solid #eee; border-bottom: 1px solid #eee; }
+  .stats span { color: #999; }
+  .stats b { display: block; color: #111; font-weight: 600; font-variant-numeric: tabular-nums; }
+  #note { color: #666; min-height: 24px; margin: 12px 0 0; }
+
+  /* transcript: role-labeled lines, all one size */
+  .msg { margin: 18px 0; }
+  .msg::before { display: block; color: #bbb; }
+  .msg.you::before { content: "you"; }
+  .msg.bot::before { content: "bot"; }
+  .msg.you .bubble { color: #555; }
+  .bubble { white-space: pre-wrap; }
+  .clause { color: #c2c2c2; transition: color .15s; }   /* dim until spoken */
+  .clause.spoken { color: #111; }                        /* lands when its audio plays */
+
+  /* composer */
+  form { position: fixed; bottom: 0; left: 0; right: 0; background: #fff; border-top: 1px solid #eee; }
+  .row { max-width: 620px; margin: 0 auto; padding: 14px 20px; display: flex; gap: 12px; }
+  input[type=text] { flex: 1; font: inherit; }   /* native box, page text size */
+  button { font: inherit; }                       /* default button */
+</style>
+
+<main>
+  <h1>rumble · chat + voice</h1>
+  <div class="sub" id="meta">connecting…</div>
+
+  <details>
+    <summary>system prompt</summary>
+    <textarea id="sys">You are a friendly Australian helper for kids. Speak simply and warmly, in one or two short sentences.</textarea>
+  </details>
+
+  <div class="stats">
+    <span>llm ttft<b id="m-ttft">–</b></span>
+    <span>first sound<b id="m-first">–</b></span>
+    <span>full reply<b id="m-full">–</b></span>
+    <span>head-start<b id="m-head">–</b></span>
+  </div>
+  <div id="note"></div>
+
+  <div id="log"></div>
+</main>
+
+<form id="composer">
+  <div class="row">
+    <input type="text" id="input" placeholder="say something…" autocomplete="off" autofocus>
+    <button id="send">send</button>
+  </div>
+</form>
+
+<script>
+const $ = id => document.getElementById(id);
+const fmt = s => s == null ? "–" : s.toFixed(2) + "s";
+const GAP = 0.09;                       // ~SAY_GAP_MS: one short pause between clauses
+let ttsOn = true, history = [], busy = false;
+let audioCtx = null, playhead = 0;      // Web Audio cursor -> gapless in-order playback
+
+fetch("/api/meta").then(r => r.json()).then(m => {
+  ttsOn = m.tts_on;
+  $("meta").innerHTML = `LLM <b>${m.model}</b> ${m.llm ? "" : "(LLM_URL unset)"} · ` +
+    (m.tts_on ? `TTS <b>${m.tts_model}</b>` : "TTS <b>off</b> — text-only, export TTS_URL to hear it");
+});
+
+function bubble(who) {
+  const wrap = document.createElement("div");
+  wrap.className = "msg " + who;
+  const b = document.createElement("div");
+  b.className = "bubble";
+  wrap.appendChild(b);
+  $("log").appendChild(wrap);
+  b.scrollIntoView({ block: "end" });
+  return b;
+}
+
+function b64ToBuf(b64) {
+  const bin = atob(b64), u8 = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
+  return u8.buffer;
+}
+
+// Schedule one clause's audio right after the previous one. Returns when it will START.
+async function playClause(b64) {
+  const buf = await audioCtx.decodeAudioData(b64ToBuf(b64));
+  const src = audioCtx.createBufferSource();
+  src.buffer = buf;
+  src.connect(audioCtx.destination);
+  const startAt = Math.max(playhead, audioCtx.currentTime);
+  src.start(startAt);
+  playhead = startAt + buf.duration + GAP;
+  return startAt;
+}
+
+async function send(text) {
+  if (busy || !text.trim()) return;
+  busy = true; $("send").disabled = true;
+  ["m-ttft", "m-first", "m-full", "m-head"].forEach(id => $(id).textContent = "–");
+  $("note").textContent = "";
+
+  bubble("you").textContent = text;
+  const bot = bubble("bot");
+  if (history.length === 0) history.push({ role: "system", content: $("sys").value });
+  history.push({ role: "user", content: text });
+
+  // The click is a user gesture -> safe to start/resume the AudioContext here.
+  if (ttsOn) { audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)(); audioCtx.resume(); playhead = audioCtx.currentTime; }
+
+  const t0 = performance.now();
+  let firstSound = null, firstReady = null;       // client wall-clock / server seconds
+  const spans = [];                               // per-clause <span> to light up on playback
+
+  const res = await fetch("/api/chat", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ messages: history }),
+  });
+
+  const reader = res.body.getReader(), dec = new TextDecoder();
+  let buf = "";
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buf += dec.decode(value, { stream: true });
+    let i;
+    while ((i = buf.indexOf("\n\n")) >= 0) {
+      const block = buf.slice(0, i); buf = buf.slice(i + 2);
+      const ev = (block.match(/^event: (.*)$/m) || [])[1];
+      const data = JSON.parse((block.match(/^data: (.*)$/m) || [])[1] || "{}");
+
+      if (ev === "ttft") {
+        $("m-ttft").textContent = fmt(data.t);
+      } else if (ev === "clause") {
+        if (firstReady === null) firstReady = data.t_ready;
+        const span = document.createElement("span");
+        span.className = "clause";
+        span.textContent = (bot.textContent ? " " : "") + data.text;
+        bot.appendChild(span); spans[data.i] = span;
+        bot.scrollIntoView({ block: "end" });
+        if (ttsOn && data.wav_b64) {
+          const startAt = await playClause(data.wav_b64);
+          const delayMs = Math.max(0, (startAt - audioCtx.currentTime) * 1000);
+          setTimeout(() => span.classList.add("spoken"), delayMs);  // light up when it actually speaks
+          if (firstSound === null) {
+            firstSound = (performance.now() - t0) + delayMs;
+            $("m-first").textContent = fmt(firstSound / 1000);
+          }
+        } else {
+          span.classList.add("spoken");
+          if (firstSound === null) { firstSound = performance.now() - t0; $("m-first").textContent = fmt(firstSound / 1000); }
+        }
+      } else if (ev === "done") {
+        history.push({ role: "assistant", content: data.full_reply });
+        $("m-full").textContent = fmt(data.wall);
+        if (firstReady !== null) {
+          const head = data.wall - firstReady;          // generation+synth still ran this long after first audio
+          $("m-head").textContent = fmt(head);
+          $("note").textContent = ttsOn
+            ? `You started hearing audio ~${head.toFixed(1)}s before the full reply was ready.`
+            : `First clause was ready ~${head.toFixed(1)}s before the full reply.`;
+        }
+      } else if (ev === "error") {
+        bot.textContent = "⚠ " + data.message;
+      }
+    }
+  }
+  busy = false; $("send").disabled = false; $("input").focus();
+}
+
+$("composer").addEventListener("submit", e => {
+  e.preventDefault();
+  const v = $("input").value; $("input").value = "";
+  send(v);
+});
+</script>
