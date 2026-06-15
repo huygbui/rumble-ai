@@ -62,17 +62,14 @@ async def chat_events(
     client: httpx.AsyncClient,
     messages: list[dict],
 ) -> AsyncIterator[Event]:
-    q: asyncio.Queue[Item] = asyncio.Queue()
+    queue: asyncio.Queue[Item] = asyncio.Queue()
     source = clauses.stream(llm.stream(client, messages))
+    events = _speak(client, queue) if settings.tts_url else _text(queue)
 
-    # Keep reading LLM clauses while TTS synthesizes earlier clauses.
-    reader = asyncio.create_task(_read(source, q))
+    # Keep clause reading independent from event emission; this lets TTS overlap when enabled.
+    reader = asyncio.create_task(_read(source, queue))
     try:
-        async for event in _speak(
-            client,
-            q,
-            audio=bool(settings.tts_url),
-        ):
+        async for event in events:
             yield event
     finally:
         reader.cancel()
@@ -80,23 +77,38 @@ async def chat_events(
             await reader
 
 
-async def _read(source: AsyncIterator[str], q: asyncio.Queue[Item]) -> None:
+async def _read(source: AsyncIterator[str], queue: asyncio.Queue[Item]) -> None:
     try:
         async for clause in source:
-            await q.put(clause)
+            await queue.put(clause)
     except Exception as e:
-        await q.put(e)
-    await q.put(None)
+        await queue.put(e)
+    await queue.put(None)
 
 
-async def _speak(
-    client: httpx.AsyncClient,
-    q: asyncio.Queue[Item],
-    audio: bool,
-) -> AsyncIterator[Event]:
+async def _text(queue: asyncio.Queue[Item]) -> AsyncIterator[Event]:
     reply: list[str] = []
     failed = False
-    while (item := await q.get()) is not None:
+    while (item := await queue.get()) is not None:
+        if isinstance(item, Exception):
+            failed = True
+            yield _error(item)
+            continue
+
+        reply.append(item)
+        yield Event("clause", {"text": item})
+    if failed:
+        return
+    yield Event(
+        "done",
+        {"full_reply": " ".join(reply)},
+    )
+
+
+async def _speak(client: httpx.AsyncClient, queue: asyncio.Queue[Item]) -> AsyncIterator[Event]:
+    reply: list[str] = []
+    failed = False
+    while (item := await queue.get()) is not None:
         if isinstance(item, Exception):
             failed = True
             yield _error(item)
@@ -104,14 +116,13 @@ async def _speak(
 
         reply.append(item)
         payload: dict[str, object] = {"text": item}
-        if audio:
-            try:
-                wav = await tts.synthesize(client, item)
-            except Exception as e:
-                yield Event("clause", payload)
-                yield _error(e)
-                continue
-            payload["wav_b64"] = base64.b64encode(wav).decode()
+        try:
+            wav = await tts.synthesize(client, item)
+        except Exception as e:
+            yield Event("clause", payload)
+            yield _error(e)
+            continue
+        payload["wav_b64"] = base64.b64encode(wav).decode()
         yield Event("clause", payload)
     if failed:
         return
