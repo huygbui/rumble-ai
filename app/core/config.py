@@ -23,8 +23,6 @@ class AppSettings(BaseSettings):
     omni_instructions: str = "female, child, high pitch, australian accent"
     omni_seed: int = 58842
     clause_max_len: int = 140
-    clause_first_max: int = 60
-    clause_min_len: int = 12
 
     stt_url: str = ""
     stt_model: str = "Qwen/Qwen3-ASR-0.6B"

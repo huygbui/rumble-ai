@@ -32,7 +32,7 @@ async def warm(request: Request) -> dict:
 async def post_chat(req: ChatRequest, request: Request) -> AsyncIterator[ServerSentEvent]:
     client = request.app.state.http
     messages = [m.model_dump() for m in req.messages]
-    async for event in pipeline.run_turn(client, messages):
+    async for event in pipeline.chat_events(client, messages):
         yield ServerSentEvent(event=event.event, data=event.data)
 
 
