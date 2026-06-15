@@ -555,14 +555,16 @@ dependencies = [
     { name = "fastapi" },
     { name = "httpx" },
     { name = "modal" },
+    { name = "pydantic" },
     { name = "uvicorn" },
 ]
 
 [package.metadata]
 requires-dist = [
-    { name = "fastapi", specifier = ">=0.115" },
+    { name = "fastapi", specifier = ">=0.135" },
     { name = "httpx", specifier = ">=0.28" },
     { name = "modal", specifier = ">=1.5.0" },
+    { name = "pydantic", specifier = ">=2" },
     { name = "uvicorn", specifier = ">=0.34" },
 ]
 
