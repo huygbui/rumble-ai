@@ -1,12 +1,13 @@
 from collections.abc import AsyncIterator
 from pathlib import Path
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse
 from fastapi.sse import EventSourceResponse, ServerSentEvent
 
 from app.api.schemas import ChatRequest, MetaResponse, TranscriptionResponse
-from app.core import dialogue, pipeline
+from app.core import pipeline
+from app.core.config import settings
 
 INDEX = Path(__file__).resolve().parents[2] / "web" / "index.html"
 
@@ -37,34 +38,17 @@ async def warm(request: Request) -> AsyncIterator[ServerSentEvent]:
 async def post_chat(req: ChatRequest, request: Request) -> AsyncIterator[ServerSentEvent]:
     client = request.app.state.http
     messages = [m.model_dump() for m in req.messages]
-    if not dialogue.LLM_URL:
-        yield ServerSentEvent(
-            event="error",
-            data={"message": "LLM_URL is not set -- export it before starting the web app"},
-        )
-        return
-    last = None
     async for event in pipeline.run_turn(client, messages):
         yield _sse(event)
-        if event.event == "done":
-            last = event.data
-    if last:
-        print(
-            f"  turn: {last['n']} clauses, {last['wall']:.2f}s wall, "
-            f"{last['total_audio']:.2f}s audio",
-            flush=True,
-        )
 
 
 @router.post("/api/stt", response_model=TranscriptionResponse)
 async def post_stt(request: Request) -> dict:
-    if not pipeline.STT_ON:
-        return {"error": "STT_URL is not set"}
+    if not settings.stt_on:
+        raise HTTPException(status_code=503, detail="STT_URL is not set")
     audio = await request.body()
     ctype = (request.headers.get("content-type") or "audio/webm").split(";")[0].strip()
     try:
-        text = await pipeline.transcribe(request.app.state.http, audio, ctype)
-        print(f"  stt: {len(audio)} bytes -> {text[:60]!r}", flush=True)
-        return {"text": text}
+        return {"text": await pipeline.transcribe(request.app.state.http, audio, ctype)}
     except Exception as e:
-        return {"error": f"{type(e).__name__}: {e}"}
+        raise HTTPException(status_code=502, detail=f"{type(e).__name__}: {e}") from e

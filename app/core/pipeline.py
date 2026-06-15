@@ -4,34 +4,11 @@ import time
 from collections.abc import AsyncIterator
 from contextlib import suppress
 from dataclasses import dataclass
-from pathlib import Path
-from typing import Any
 
 import httpx
-from pydantic import field_validator
 
-from app.core import dialogue, speech
-from app.core.settings import AppSettings, strip_url
-
-
-class PipelineSettings(AppSettings):
-    stt_url: str = ""
-    stt_model: str = "Qwen/Qwen3-ASR-0.6B"
-    warm_budget: int = 300
-
-    @field_validator("stt_url", mode="before")
-    @classmethod
-    def _strip_url(cls, value: str | None) -> str:
-        return strip_url(value)
-
-
-pipeline_settings = PipelineSettings()
-
-STT_URL = pipeline_settings.stt_url
-STT_MODEL = pipeline_settings.stt_model
-WARM_BUDGET = pipeline_settings.warm_budget
-TTS_ON = bool(speech.TTS_URL)
-STT_ON = bool(STT_URL)
+from app.core import llm, text_chunks, tts
+from app.core.config import settings
 
 STT_EXT = {
     "audio/webm": "webm",
@@ -46,19 +23,19 @@ STT_EXT = {
 @dataclass(frozen=True, slots=True)
 class StreamEvent:
     event: str
-    data: dict[str, Any]
+    data: dict[str, object]
 
 
-def meta_payload() -> dict[str, Any]:
+def meta_payload() -> dict[str, object]:
     return {
-        "llm": dialogue.LLM_URL or None,
-        "model": dialogue.LLM_MODEL,
-        "tts": speech.TTS_URL or None,
-        "tts_model": speech.MODEL,
-        "tts_on": TTS_ON,
-        "stt": STT_URL or None,
-        "stt_model": STT_MODEL,
-        "stt_on": STT_ON,
+        "llm": settings.llm_url or None,
+        "model": settings.llm_model,
+        "tts": settings.tts_url or None,
+        "tts_model": settings.tts_model,
+        "tts_on": settings.tts_on,
+        "stt": settings.stt_url or None,
+        "stt_model": settings.stt_model,
+        "stt_on": settings.stt_on,
     }
 
 
@@ -67,20 +44,20 @@ async def run_turn(client: httpx.AsyncClient, messages: list[dict]) -> AsyncIter
     t0 = time.time()
 
     async def produce():
-        streamer = dialogue.ClauseStreamer()
+        splitter = text_chunks.StreamingClauseSplitter()
         ttft_sent = False
         try:
-            async with client.stream("POST", dialogue.LLM_CHAT_URL, json=dialogue.llm_payload(messages)) as r:
+            async with client.stream("POST", settings.llm_chat_url, json=llm.make_chat_payload(messages)) as r:
                 r.raise_for_status()
                 async for line in r.aiter_lines():
-                    if not (delta := dialogue.parse_sse_delta(line)):
+                    if not (delta := llm.parse_sse_delta(line)):
                         continue
                     if not ttft_sent and delta.strip():
                         ttft_sent = True
                         await clauses.put(StreamEvent("ttft", {"t": time.time() - t0}))
-                    for clause in streamer.feed(delta):
+                    for clause in splitter.feed(delta):
                         await clauses.put(clause)
-            for clause in streamer.flush():
+            for clause in splitter.flush():
                 await clauses.put(clause)
         except Exception as e:
             await clauses.put(StreamEvent("error", {"message": f"{type(e).__name__}: {e}"}))
@@ -88,7 +65,7 @@ async def run_turn(client: httpx.AsyncClient, messages: list[dict]) -> AsyncIter
 
     task = asyncio.create_task(produce())
     try:
-        gen = _voice_turn(client, clauses, t0) if TTS_ON else _text_turn(clauses, t0)
+        gen = _voice_turn(client, clauses, t0) if settings.tts_on else _text_turn(clauses, t0)
         async for event in gen:
             yield event
     finally:
@@ -112,20 +89,19 @@ async def _text_turn(clauses, t0) -> AsyncIterator[StreamEvent]:
 
 
 async def _voice_turn(client, clauses, t0) -> AsyncIterator[StreamEvent]:
-    parts, wavs, total_audio, i = [], [], 0.0, 0
+    parts, total_audio, i = [], 0.0, 0
     while (item := await clauses.get()) is not None:
         if isinstance(item, StreamEvent):
             yield item
             continue
         try:
-            synth_s, wav = await synth(client, item)
+            synth_s, wav = await synthesize_clause(client, item)
         except Exception as e:
             yield StreamEvent("error", {"message": f"{type(e).__name__}: {e}"})
             continue
-        dur = speech.wav_dur(wav)
+        dur = tts.wav_duration(wav)
         total_audio += dur
         parts.append(item)
-        wavs.append((i, wav))
         yield StreamEvent(
             "clause",
             {
@@ -138,7 +114,6 @@ async def _voice_turn(client, clauses, t0) -> AsyncIterator[StreamEvent]:
             },
         )
         i += 1
-    await asyncio.to_thread(_save_stitched, wavs)
     yield StreamEvent(
         "done",
         {
@@ -150,32 +125,21 @@ async def _voice_turn(client, clauses, t0) -> AsyncIterator[StreamEvent]:
     )
 
 
-async def synth(client: httpx.AsyncClient, text: str) -> tuple[float, bytes]:
+async def synthesize_clause(client: httpx.AsyncClient, text: str) -> tuple[float, bytes]:
     t0 = time.time()
-    r = await client.post(speech.SPEECH_URL, json=speech.make_payload(text))
+    r = await client.post(settings.tts_speech_url, json=tts.make_speech_payload(text))
     r.raise_for_status()
     return time.time() - t0, r.content
 
 
-def _save_stitched(wavs: list[tuple[int, bytes]]) -> None:
-    if not wavs:
-        return
-    try:
-        out = Path(speech.OUT_DIR)
-        out.mkdir(parents=True, exist_ok=True)
-        (out / "web.wav").write_bytes(speech.stitch([wav for _, wav in sorted(wavs)]))
-    except Exception:
-        pass
-
-
 def _stages() -> list[tuple[str, str]]:
     stages = []
-    if STT_ON:
-        stages.append(("stt", STT_URL))
-    if dialogue.LLM_URL:
-        stages.append(("llm", dialogue.LLM_URL))
-    if TTS_ON:
-        stages.append(("tts", speech.TTS_URL))
+    if settings.stt_on:
+        stages.append(("stt", settings.stt_url))
+    if settings.llm_url:
+        stages.append(("llm", settings.llm_url))
+    if settings.tts_on:
+        stages.append(("tts", settings.tts_url))
     return stages
 
 
@@ -195,7 +159,7 @@ async def warm_stream(client: httpx.AsyncClient) -> AsyncIterator[StreamEvent]:
     t0 = time.time()
 
     async def warm_up(name, base):
-        while time.time() - t0 < WARM_BUDGET:
+        while time.time() - t0 < settings.warm_budget:
             if await _health_ok(client, base):
                 return name, True, time.time() - t0
             await asyncio.sleep(2)
@@ -207,7 +171,6 @@ async def warm_stream(client: httpx.AsyncClient) -> AsyncIterator[StreamEvent]:
     for done in asyncio.as_completed(tasks):
         name, ok, t = await done
         all_ok &= ok
-        print(f"  warm: {name} {'ready' if ok else 'FAILED'} in {t:.1f}s", flush=True)
         yield StreamEvent("stage", {"name": name, "status": "ready" if ok else "failed", "t": t})
     yield StreamEvent("done", {"ready": all_ok})
 
@@ -217,9 +180,9 @@ async def transcribe(client: httpx.AsyncClient, audio: bytes, ctype: str, attemp
     last = ""
     for _ in range(attempts):
         r = await client.post(
-            f"{STT_URL}/v1/audio/transcriptions",
+            f"{settings.stt_url}/v1/audio/transcriptions",
             files={"file": (f"speech.{ext}", audio, ctype)},
-            data={"model": STT_MODEL},
+            data={"model": settings.stt_model},
         )
         if r.status_code == 200:
             return (r.json().get("text") or "").strip()

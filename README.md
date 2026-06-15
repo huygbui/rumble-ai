@@ -19,7 +19,7 @@ one `client.py` drives any of them via `TTS_MODEL`.
 app/                  # FastAPI app package
   main.py             # create_app(), lifespan, app, and `python -m app.main`
   api/                # HTTP boundary: routers and Pydantic request/response schemas
-  core/               # reusable pipeline logic: LLM streaming, TTS chunking, STT, warm-up
+  core/               # runtime helpers: config, llm, tts, text chunking, STT, warm-up
   cli/                # CLI entrypoints: `python -m app.cli.say`, `python -m app.cli.chat`
 tts/                  # TTS component — one Modal app per candidate model
   fish_s2_pro.py      # fishaudio/s2-pro — baseline (research license, ~49 GiB, 80GB GPU)

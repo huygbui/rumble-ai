@@ -22,5 +22,4 @@ class MetaResponse(BaseModel):
 
 
 class TranscriptionResponse(BaseModel):
-    text: str | None = None
-    error: str | None = None
+    text: str
