@@ -38,3 +38,7 @@ def main() -> None:
     ]
     reply = dialogue.converse(messages)
     print(f"\nbot> {reply}")
+
+
+if __name__ == "__main__":
+    main()

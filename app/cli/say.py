@@ -43,3 +43,7 @@ def main() -> None:
         tt, b = speech.synth(text)
         print(f"  first(&only) audio at {tt:.2f}s  |  {speech.wav_dur(b):.2f}s audio")
         print("  (single-shot TTFA == full synth time; chunked TTFA above is the win)")
+
+
+if __name__ == "__main__":
+    main()

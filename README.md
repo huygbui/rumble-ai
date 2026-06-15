@@ -2,7 +2,7 @@
 
 A self-hosted **voice conversation** stack served on [Modal](https://modal.com), built up
 one component at a time. Today it hosts the **TTS** stage as a 3-way model bake-off;
-**STT** and **LLM** components — then a back-and-forth `chat.py` loop wiring
+**STT** and **LLM** components — then a back-and-forth `app.cli.chat` loop wiring
 STT → LLM → TTS — are next.
 
 Every model is served behind the same OpenAI-compatible `POST /v1/audio/speech` shape, so
@@ -17,10 +17,10 @@ one `client.py` drives any of them via `TTS_MODEL`.
 
 ```
 app/                  # FastAPI app package
-  main.py             # create_app(), lifespan, app, and `python web.py` launcher target
+  main.py             # create_app(), lifespan, app, and `python -m app.main`
   api/                # HTTP boundary: routers and Pydantic request/response schemas
   core/               # reusable pipeline logic: LLM streaming, TTS chunking, STT, warm-up
-  cli/                # CLI adapters for the top-level scripts
+  cli/                # CLI entrypoints: `python -m app.cli.say`, `python -m app.cli.chat`
 tts/                  # TTS component — one Modal app per candidate model
   fish_s2_pro.py      # fishaudio/s2-pro — baseline (research license, ~49 GiB, 80GB GPU)
   omnivoice.py        # k2-fsa/OmniVoice — top pick (Apache-2.0, native AU accent, 24GB GPU)
@@ -28,9 +28,6 @@ tts/                  # TTS component — one Modal app per candidate model
 stt/                  # (next) speech-to-text candidates — one Modal app per model
 llm/                  # (next) dialogue-LLM candidates — one Modal app per model
 client.py             # drive any /v1/audio/speech endpoint; per-model shape via TTS_MODEL
-web.py                # compatibility launcher: `uvicorn web:app` or `python web.py`
-say.py                # compatibility launcher for low-latency "say this"
-chat.py               # compatibility launcher for the text-to-voice chat loop
 bench.py              # latency / streaming / concurrency benchmark
 docs/
   tts-options.md      # ranked evaluation of TTS/S2S options for this use case

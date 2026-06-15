@@ -42,7 +42,7 @@ def make_payload(text: str) -> dict:
         }
     if MODEL == "fish":
         return {"input": text, "voice": VOICE, "response_format": "wav", "seed": 58842}
-    raise SystemExit(f"say.py supports TTS_MODEL=omnivoice|fish; got {MODEL!r}")
+    raise SystemExit(f"app.cli.say supports TTS_MODEL=omnivoice|fish; got {MODEL!r}")
 
 
 def synth(text: str):

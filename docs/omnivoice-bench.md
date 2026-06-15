@@ -49,7 +49,7 @@ instant.
 > win because the loop is graph-bound, not FLOP-bound; (b) true server-side streaming is
 > **architecturally impossible** (NAR diffusion fixes output length up front and has no 'early'
 > tokens) — so the '3.22 s streaming TTFA' below was actually *buffered full synth*; client-side
-> clause chunking (say.py) is the only TTFA lever; (c) the real server-side latency lever is the
+> clause chunking (app.cli.say) is the only TTFA lever; (c) the real server-side latency lever is the
 > diffusion **`num_step`** (32->24/16, a quality tradeoff), not precision or eager-mode.
 
 ## 2. Quality (A/B)
@@ -95,7 +95,7 @@ still needs ears):
 2. **Disable `enforce_eager`** for CUDA graphs — **DEAD — the diffusion loop is already
    CUDA-graphed (independent of `enforce_eager`)**; there is no graph speedup left to unlock.
 3. **Streaming TTFA** — **RESOLVED — NO: OmniVoice cannot stream (NAR diffusion); keep
-   client-side chunking** (see `say.py`). The model fixes output length up front and emits no
+   client-side chunking** (see `app.cli.say`). The model fixes output length up front and emits no
    early tokens, so there are no earlier chunks for vllm-omni to surface.
 4. **`num_step` (32->24->16)** is the real server-side latency lever — fewer diffusion steps
    directly shorten the loop, at a quality tradeoff. Caveat: vllm-omni's `--hf-overrides` may
@@ -143,21 +143,21 @@ lever is **`num_step`** (32→24→16), not precision or eager-mode (disabling `
 nothing — the loop is graphed regardless). To retry dtype anyway: re-add `--dtype` to
 `tts/omnivoice.py`'s serve cmd and `modal deploy`.
 
-### Client-side sentence chunking — ADOPTED (`say.py`)
+### Client-side sentence chunking — ADOPTED (`app.cli.say`)
 
-Server-side streaming barely helps here (TTFA ~3.2 s). `say.py` instead splits the reply
+Server-side streaming barely helps here (TTFA ~3.2 s). `app.cli.say` instead splits the reply
 into clauses and synthesizes them **pipelined** — first audio plays while the rest generate:
 
 | approach | TTFA (first audio) |
 |---|---|
 | single-shot (whole utterance) | 3.30 s — and grows with length (5.4 s medium, 11.9 s long) |
 | server streaming | 3.22 s |
-| **chunked (`say.py`)** | **2.21 s** — ≈ one short-clause synth; ~flat regardless of reply length |
+| **chunked (`app.cli.say`)** | **2.21 s** — ≈ one short-clause synth; ~flat regardless of reply length |
 
 The win grows with reply length: chunked TTFA stays ~2.2 s while single-shot scales with
 text. The ~2.2 s floor is the per-request fixed overhead (can't go lower without true
 server streaming, which this model lacks). This is the responsiveness pattern for the
-eventual `chat.py` loop. Run: `echo "..." | TTS_URL=… TTS_MODEL=omnivoice python say.py`
+eventual `app.cli.chat` loop. Run: `echo "..." | TTS_URL=… TTS_MODEL=omnivoice python -m app.cli.say`
 (`PLAY=1` to hear it, `COMPARE=1` to also time single-shot).
 
 ## Reproduce

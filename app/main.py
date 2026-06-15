@@ -48,3 +48,7 @@ def main() -> None:
     )
     print(f"\n  open  ->  http://{host}:{port}\n")
     uvicorn.run(app, host=host, port=port, log_level="warning")
+
+
+if __name__ == "__main__":
+    main()

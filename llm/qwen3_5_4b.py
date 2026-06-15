@@ -279,7 +279,7 @@ class QwenVllm:
         #     CRIU-checkpointable -- but that path is slower to build and less certain.)
         # NOTE on THINKING: Qwen3.5 has thinking ON by default and NO `/think` soft switch.
         # Disable it PER REQUEST with `chat_template_kwargs: {"enable_thinking": false}`
-        # (see the local_entrypoint + chat.py). There is no serve-time flag to force it off.
+        # (see the local_entrypoint + app.core.dialogue). There is no serve-time flag to force it off.
         cmd = [
             "vllm",
             "serve",
