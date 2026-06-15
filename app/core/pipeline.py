@@ -3,6 +3,7 @@ import base64
 from collections.abc import AsyncIterator
 from contextlib import suppress
 from dataclasses import dataclass
+from typing import Literal
 
 import httpx
 
@@ -10,10 +11,28 @@ from app.core import clauses, llm, tts
 from app.core.config import settings
 
 
+EventName = Literal["clause", "done", "error"]
+
+
 @dataclass(frozen=True, slots=True)
 class Event:
-    event: str
+    event: EventName
     data: dict[str, object]
+
+
+def _clause_event(text: str, wav_b64: str | None = None) -> Event:
+    data: dict[str, object] = {"text": text}
+    if wav_b64 is not None:
+        data["wav_b64"] = wav_b64
+    return Event("clause", data)
+
+
+def _done_event(full_reply: str) -> Event:
+    return Event("done", {"full_reply": full_reply})
+
+
+def _error_event(message: object) -> Event:
+    return Event("error", {"message": str(message)})
 
 
 Item = str | Exception | None
@@ -92,17 +111,14 @@ async def _text(queue: asyncio.Queue[Item]) -> AsyncIterator[Event]:
     while (item := await queue.get()) is not None:
         if isinstance(item, Exception):
             failed = True
-            yield Event("error", {"message": str(item)})
+            yield _error_event(item)
             continue
 
         reply.append(item)
-        yield Event("clause", {"text": item})
+        yield _clause_event(item)
     if failed:
         return
-    yield Event(
-        "done",
-        {"full_reply": " ".join(reply)},
-    )
+    yield _done_event(" ".join(reply))
 
 
 async def _speak(client: httpx.AsyncClient, queue: asyncio.Queue[Item]) -> AsyncIterator[Event]:
@@ -111,25 +127,21 @@ async def _speak(client: httpx.AsyncClient, queue: asyncio.Queue[Item]) -> Async
     while (item := await queue.get()) is not None:
         if isinstance(item, Exception):
             failed = True
-            yield Event("error", {"message": str(item)})
+            yield _error_event(item)
             continue
 
         reply.append(item)
-        payload: dict[str, object] = {"text": item}
         try:
             wav = await tts.synthesize(client, item)
         except Exception as e:
-            yield Event("clause", payload)
-            yield Event("error", {"message": str(e)})
+            yield _clause_event(item)
+            yield _error_event(e)
             continue
-        payload["wav_b64"] = base64.b64encode(wav).decode()
-        yield Event("clause", payload)
+        yield _clause_event(item, wav_b64=base64.b64encode(wav).decode())
     if failed:
         return
-    yield Event(
-        "done",
-        {"full_reply": " ".join(reply)},
-    )
+    yield _done_event(" ".join(reply))
+
 
 async def _health_ok(client: httpx.AsyncClient, base: str) -> bool:
     try:
