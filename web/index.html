@@ -125,7 +125,7 @@ async function warm() {
   const wb = $("warm");
   wb.disabled = true; wb.textContent = "warming…";
   STAGES.forEach(n => { if (!R[n]) setDot(n, "warming"); });
-  $("note").textContent = "warming up… a cold start can take ~1–3 min.";
+  $("note").textContent = "warming up… ~20–40s from snapshot (a minute or two on the very first build).";
   try {
     const res = await fetch("/api/warm");
     const reader = res.body.getReader(), dec = new TextDecoder();
@@ -283,7 +283,11 @@ async function send(text) {
             : `First clause was ready ~${head.toFixed(1)}s before the full reply.`;
         }
       } else if (ev === "error") {
-        bot.textContent = "⚠ " + data.message;
+        const warn = document.createElement("span");          // append -- don't wipe spoken clauses
+        warn.className = "clause spoken";
+        warn.textContent = (bot.textContent ? " " : "") + "⚠ " + data.message;
+        bot.appendChild(warn);
+        $("note").textContent = data.message;
       }
     }
   }

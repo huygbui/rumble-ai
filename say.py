@@ -6,7 +6,7 @@
 # but one short clause synthesizes in ~the per-request floor (~2.5s) and can start playing
 # while the rest generate -- so felt latency tracks the FIRST clause, not the whole reply.
 #
-#   export TTS_URL="https://<workspace>--omnivoice-tts-serve.modal.run"
+#   export TTS_URL="<flash url from `modal deploy tts/omnivoice.py`>"
 #   export TTS_MODEL=omnivoice            # omnivoice | fish (fish needs a pre-registered TTS_VOICE)
 #   echo "G'day! Want to hear a quick story? It begins on a windy hill." | python say.py
 #   TTS_TEXT="..." python say.py          # or pass text via env

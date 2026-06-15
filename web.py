@@ -10,7 +10,8 @@
 # chat.py's ClauseStreamer/llm_stream and say.py's synth/wav_dur/stitch unchanged.
 #
 #   export LLM_URL="<flash url from `modal deploy llm/qwen3_5_4b.py`>"
-#   export TTS_URL="https://<workspace>--omnivoice-tts-serve.modal.run"   # omit -> text-only
+#   export TTS_URL="<flash url from `modal deploy tts/omnivoice.py`>"     # omit -> text-only
+#   export STT_URL="<flash url from `modal deploy stt/qwen3_asr.py`>"     # omit -> mic disabled
 #   python web.py            # -> http://127.0.0.1:8000   (PORT=... to change)
 #
 # Transport: POST /api/chat with {messages:[...]} -> an SSE stream (text/event-stream, chunked)
@@ -44,8 +45,9 @@ STT_SESSION = requests.Session()  # keep-alive to the ASR host (its own, separat
 STT_EXT = {"audio/webm": "webm", "audio/ogg": "ogg", "audio/mp4": "m4a",
            "audio/mpeg": "mp3", "audio/wav": "wav", "audio/x-wav": "wav"}
 
-# --- Readiness / warm-up: every stage scales to zero, so the first hit cold-starts (STT ~150s,
-# LLM snapshot restore, TTS) -- jarring on a button tap. /api/status probes; /api/warm waits them up.
+# --- Readiness / warm-up: every stage scales to zero, so the first hit cold-starts. GPU snapshots
+# make that fast (STT ~1-2s, TTS ~15s, LLM ~25s restore; minutes only on the first snapshot build) --
+# but it's still jarring on a button tap, so /api/warm actively waits every stage up first.
 WARM_BUDGET = int(os.environ.get("WARM_BUDGET", "300"))  # s, per-stage warm-up deadline
 PROBE = requests.Session()  # /health probes across all three hosts
 
@@ -70,21 +72,6 @@ def _health_ok(base, timeout):
         return PROBE.get(f"{base}/health", timeout=timeout, allow_redirects=False).status_code == 200
     except Exception:
         return False
-
-
-def _probe_all(timeout):
-    # Probe every stage's /health concurrently -> {name: ready_bool}.
-    out = {}
-
-    def go(n, b):
-        out[n] = _health_ok(b, timeout)
-
-    ts = [threading.Thread(target=go, args=(n, b)) for n, b in _stages()]
-    for t in ts:
-        t.start()
-    for t in ts:
-        t.join()
-    return out
 
 
 # --- One conversational turn, as a stream of (event, data) pairs -----------------------
@@ -233,10 +220,6 @@ class Handler(BaseHTTPRequestHandler):
                     "tts": say.BASE or None, "tts_model": say.MODEL, "tts_on": TTS_ON,
                     "stt": STT_BASE or None, "stt_model": STT_MODEL, "stt_on": STT_ON}
             self._send(200, json.dumps(meta).encode(), "application/json")
-        elif path == "/api/status":  # quick snapshot of which stages are warm right now
-            st = _probe_all(timeout=4)
-            stages = [{"name": n, "ready": st.get(n, False)} for n, _ in _stages()]
-            self._send(200, json.dumps({"stages": stages}).encode(), "application/json")
         elif path == "/api/warm":  # actively wait every stage up, streaming each as it lands
             self.handle_warm()
         else:
@@ -298,10 +281,11 @@ class Handler(BaseHTTPRequestHandler):
 
     @staticmethod
     def _asr(audio, ctype, ext, attempts=4):
-        # Cold start: while the scaled-to-zero ASR container wakes (~150s), Modal proxies a 303
-        # back instead of holding the request. requests would downgrade that 303 to a body-less
-        # GET, so we set allow_redirects=False, SEE the 303, and re-POST the same multipart until
-        # the container serves a 200. (Verified 2026-06-15: cold 303 -> warm 200 with transcript.)
+        # Cold start: while the scaled-to-zero ASR container wakes (snapshot restore ~1-2s, but the
+        # first POST can race the wake), Modal proxies a 303 back instead of holding the request.
+        # requests would downgrade that 303 to a body-less GET, so we set allow_redirects=False,
+        # SEE the 303, and re-POST the same multipart until the container serves a 200.
+        # (Verified 2026-06-15: cold 303 -> warm 200 with transcript.)
         last = ""
         for _ in range(attempts):
             r = STT_SESSION.post(

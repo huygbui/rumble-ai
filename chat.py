@@ -12,7 +12,7 @@
 # While clause 0 PLAYS, clause 1 SYNTHESIZES, and the LLM is still GENERATING clause 2.
 #
 #   export LLM_URL="<flash url printed by `modal deploy llm/qwen3_5_4b.py`>"  # GPU-snapshot Flash server
-#   export TTS_URL="https://<workspace>--omnivoice-tts-serve.modal.run"   # omit -> text-only
+#   export TTS_URL="<flash url from `modal deploy tts/omnivoice.py`>"   # omit -> text-only
 #   echo "tell me a tiny story about a wombat" | python chat.py
 #   CHAT_TEXT="g'day!" python chat.py     # one turn via env
 #   PLAY=1 ...                            # speak through afplay as clauses arrive (macOS)
