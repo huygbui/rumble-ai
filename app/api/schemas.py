@@ -23,7 +23,6 @@ class MetaResponse(BaseModel):
 class WarmStage(BaseModel):
     name: str
     status: str
-    t: float
 
 
 class WarmResponse(BaseModel):

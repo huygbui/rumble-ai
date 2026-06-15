@@ -1,4 +1,5 @@
 import re
+from collections.abc import AsyncIterator
 
 from app.core.config import settings
 
@@ -82,3 +83,12 @@ class ClauseBuffer:
             return []
         self.first_done = True
         return [clause]
+
+
+async def stream(parts: AsyncIterator[str]) -> AsyncIterator[str]:
+    buffer = ClauseBuffer()
+    async for part in parts:
+        for clause in buffer.feed(part):
+            yield clause
+    for clause in buffer.flush():
+        yield clause

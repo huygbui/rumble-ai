@@ -17,10 +17,6 @@
   textarea { width: 100%; margin-top: 8px; padding: 8px 10px; font: inherit;
     color: #111; border: 1px solid #e2e2e2; background: #fafafa; resize: vertical; min-height: 52px; }
 
-  /* metrics: hierarchy from color, not size */
-  .stats { display: flex; flex-wrap: wrap; gap: 22px; padding: 14px 0; border-top: 1px solid #eee; border-bottom: 1px solid #eee; }
-  .stats span { color: #999; }
-  .stats b { display: block; color: #111; font-weight: 600; font-variant-numeric: tabular-nums; }
   #note { color: #666; min-height: 24px; margin: 12px 0 0; }
 
   /* transcript: role-labeled lines, all one size */
@@ -66,12 +62,6 @@
     <textarea id="sys">You are a friendly Australian helper for kids. Speak simply and warmly, in one or two short sentences.</textarea>
   </details>
 
-  <div class="stats">
-    <span>llm ttft<b id="m-ttft">–</b></span>
-    <span>first sound<b id="m-first">–</b></span>
-    <span>full reply<b id="m-full">–</b></span>
-    <span>head-start<b id="m-head">–</b></span>
-  </div>
   <div id="note"></div>
 
   <div id="log"></div>
@@ -87,7 +77,6 @@
 
 <script>
 const $ = id => document.getElementById(id);
-const fmt = s => s == null ? "–" : s.toFixed(2) + "s";
 
 // Read an SSE response body, calling onEvent(event, data) per `event:/data:` frame.
 async function readSSE(res, onEvent) {
@@ -227,7 +216,6 @@ async function playClause(b64) {
 async function send(text) {
   if (busy || !text.trim()) return;
   busy = true; refreshGates();          // grey send + mic while the model replies
-  ["m-ttft", "m-first", "m-full", "m-head"].forEach(id => $(id).textContent = "–");
   $("note").textContent = "";
 
   bubble("you").textContent = text;
@@ -238,47 +226,27 @@ async function send(text) {
   // The click is a user gesture -> safe to start/resume the AudioContext here.
   if (ttsOn) { audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)(); audioCtx.resume(); playhead = audioCtx.currentTime; }
 
-  const t0 = performance.now();
-  let firstSound = null, firstReady = null;       // client wall-clock / server seconds
-  const spans = [];                               // per-clause <span> to light up on playback
-
   const res = await fetch("/api/chat", {
     method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ messages: history }),
   });
 
   await readSSE(res, async (ev, data) => {
-    if (ev === "ttft") {
-      $("m-ttft").textContent = fmt(data.t);
-    } else if (ev === "clause") {
-      if (firstReady === null) firstReady = data.t_ready;
+    if (ev === "clause") {
       const span = document.createElement("span");
       span.className = "clause";
       span.textContent = (bot.textContent ? " " : "") + data.text;
-      bot.appendChild(span); spans[data.i] = span;
+      bot.appendChild(span);
       bot.scrollIntoView({ block: "end" });
       if (ttsOn && data.wav_b64) {
         const startAt = await playClause(data.wav_b64);
         const delayMs = Math.max(0, (startAt - audioCtx.currentTime) * 1000);
         setTimeout(() => span.classList.add("spoken"), delayMs);  // light up when it actually speaks
-        if (firstSound === null) {
-          firstSound = (performance.now() - t0) + delayMs;
-          $("m-first").textContent = fmt(firstSound / 1000);
-        }
       } else {
         span.classList.add("spoken");
-        if (firstSound === null) { firstSound = performance.now() - t0; $("m-first").textContent = fmt(firstSound / 1000); }
       }
     } else if (ev === "done") {
       history.push({ role: "assistant", content: data.full_reply });
-      $("m-full").textContent = fmt(data.wall);
-      if (firstReady !== null) {
-        const head = data.wall - firstReady;          // generation+synth still ran this long after first audio
-        $("m-head").textContent = fmt(head);
-        $("note").textContent = ttsOn
-          ? `You started hearing audio ~${head.toFixed(1)}s before the full reply was ready.`
-          : `First clause was ready ~${head.toFixed(1)}s before the full reply.`;
-      }
     } else if (ev === "error") {
       const warn = document.createElement("span");          // append -- don't wipe spoken clauses
       warn.className = "clause spoken";

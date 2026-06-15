@@ -1,6 +1,5 @@
 import asyncio
 import base64
-import time
 from collections.abc import AsyncIterator
 from contextlib import suppress
 from dataclasses import dataclass
@@ -17,7 +16,7 @@ class Event:
     data: dict[str, object]
 
 
-Part = Event | str | None
+Item = str | Exception | None
 
 
 def meta_payload() -> dict[str, object]:
@@ -45,15 +44,15 @@ async def warm(client: httpx.AsyncClient) -> dict[str, object]:
     if not stages:
         return {"ready": False, "stages": []}
 
-    started_at = time.monotonic()
-    deadline = started_at + settings.warm_budget
-
     async def warm_stage(name: str, base: str) -> dict[str, object]:
-        while (remaining := deadline - time.monotonic()) > 0:
-            if await _health_ok(client, base, timeout=min(30, remaining)):
-                return {"name": name, "status": "ready", "t": time.monotonic() - started_at}
-            await asyncio.sleep(min(2, max(0, deadline - time.monotonic())))
-        return {"name": name, "status": "failed", "t": time.monotonic() - started_at}
+        try:
+            async with asyncio.timeout(settings.warm_budget):
+                while True:
+                    if await _health_ok(client, base):
+                        return {"name": name, "status": "ready"}
+                    await asyncio.sleep(2)
+        except TimeoutError:
+            return {"name": name, "status": "failed"}
 
     results = await asyncio.gather(*(warm_stage(name, base) for name, base in stages))
     return {"ready": all(result["status"] == "ready" for result in results), "stages": results}
@@ -63,94 +62,72 @@ async def chat_events(
     client: httpx.AsyncClient,
     messages: list[dict],
 ) -> AsyncIterator[Event]:
-    parts: asyncio.Queue[Part] = asyncio.Queue()
-    started_at = time.monotonic()
+    q: asyncio.Queue[Item] = asyncio.Queue()
+    source = clauses.stream(llm.stream(client, messages))
 
-    task = asyncio.create_task(_pipe(_llm(client, messages, started_at), parts))
+    # Keep reading LLM clauses while TTS synthesizes earlier clauses.
+    reader = asyncio.create_task(_read(source, q))
     try:
-        async for event in _events(
+        async for event in _speak(
             client,
-            parts,
-            started_at,
+            q,
             audio=bool(settings.tts_url),
         ):
             yield event
     finally:
-        task.cancel()
+        reader.cancel()
         with suppress(asyncio.CancelledError):
-            await task
+            await reader
 
 
-async def _llm(
-    client: httpx.AsyncClient,
-    messages: list[dict],
-    started_at: float,
-) -> AsyncIterator[Event | str]:
-    buffer = clauses.ClauseBuffer()
-    ttft_sent = False
-
-    async for delta in llm.stream(client, messages):
-        if delta.strip() and not ttft_sent:
-            ttft_sent = True
-            yield Event("ttft", {"t": time.monotonic() - started_at})
-        for clause in buffer.feed(delta):
-            yield clause
-
-    for clause in buffer.flush():
-        yield clause
-
-
-async def _pipe(source: AsyncIterator[Event | str], parts: asyncio.Queue[Part]) -> None:
+async def _read(source: AsyncIterator[str], q: asyncio.Queue[Item]) -> None:
     try:
-        async for part in source:
-            await parts.put(part)
+        async for clause in source:
+            await q.put(clause)
     except Exception as e:
-        await parts.put(Event("error", {"message": f"{type(e).__name__}: {e}"}))
-    await parts.put(None)
+        await q.put(e)
+    await q.put(None)
 
 
-async def _events(
+async def _speak(
     client: httpx.AsyncClient,
-    parts: asyncio.Queue[Part],
-    started_at: float,
+    q: asyncio.Queue[Item],
     audio: bool,
 ) -> AsyncIterator[Event]:
-    text_parts: list[str] = []
+    reply: list[str] = []
     failed = False
-    i = 0
-    while (part := await parts.get()) is not None:
-        if isinstance(part, Event):
-            failed = failed or part.event == "error"
-            yield part
+    while (item := await q.get()) is not None:
+        if isinstance(item, Exception):
+            failed = True
+            yield _error(item)
             continue
 
-        text_parts.append(part)
-        payload: dict[str, object] = {"i": i, "text": part, "t_ready": time.monotonic() - started_at}
+        reply.append(item)
+        payload: dict[str, object] = {"text": item}
         if audio:
             try:
-                wav = await tts.synthesize(client, part)
+                wav = await tts.synthesize(client, item)
             except Exception as e:
                 yield Event("clause", payload)
-                yield Event("error", {"message": f"{type(e).__name__}: {e}"})
-                i += 1
+                yield _error(e)
                 continue
             payload["wav_b64"] = base64.b64encode(wav).decode()
         yield Event("clause", payload)
-        i += 1
     if failed:
         return
     yield Event(
         "done",
-        {
-            "wall": time.monotonic() - started_at,
-            "full_reply": " ".join(text_parts),
-        },
+        {"full_reply": " ".join(reply)},
     )
 
 
-async def _health_ok(client: httpx.AsyncClient, base: str, timeout: float) -> bool:
+def _error(e: Exception) -> Event:
+    return Event("error", {"message": f"{type(e).__name__}: {e}"})
+
+
+async def _health_ok(client: httpx.AsyncClient, base: str) -> bool:
     try:
-        r = await client.get(f"{base}/health", timeout=timeout)
+        r = await client.get(f"{base}/health", timeout=30)
         return r.status_code == 200
     except httpx.HTTPError:
         return False
