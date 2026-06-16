@@ -9,6 +9,9 @@ wheels/
 # Virtual environments
 .venv
 
+# Local secrets / endpoint URLs
+.env
+
 # Generated audio (client.py + demo clips both write to ./out)
 *.wav
 *.mp3
