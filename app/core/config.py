@@ -70,6 +70,7 @@ class AppSettings(BaseSettings):
 
     warm_budget: int = 300  # /api/warm health-poll budget; covers a first build
     cold_start_budget: int = 90  # per-request 503 tolerance; covers snapshot restore
+    ready_cache_ttl: float = 60  # trust a /health 200 this long, so warm requests skip the pre-flight poll
 
     @field_validator("llm_url", "tts_url", "stt_url", mode="before")
     @classmethod

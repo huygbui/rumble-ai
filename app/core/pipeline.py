@@ -1,5 +1,6 @@
 import asyncio
 import base64
+import time
 from collections.abc import AsyncIterator
 from contextlib import suppress
 from dataclasses import dataclass
@@ -73,13 +74,30 @@ async def warm(client: httpx.AsyncClient) -> dict[str, object]:
     return {"ready": all(result["status"] == "ready" for result in results), "stages": results}
 
 
+# Readiness cache: a /health 200 stays trusted for ready_cache_ttl, so warm requests skip
+# the pre-flight poll (one us-east RTT) entirely. A stage that scales to zero in the meantime
+# is caught by the retry layer in app.core.client, which waits out the cold-start 503 on the
+# real call — so a stale-True here costs at most a retry, never a failure.
+_ready_seen: dict[str, float] = {}
+
+
+def _mark_ready(base: str) -> None:
+    _ready_seen[base] = time.monotonic()
+
+
+def _recently_ready(base: str) -> bool:
+    seen = _ready_seen.get(base)
+    return seen is not None and time.monotonic() - seen < settings.ready_cache_ttl
+
+
 async def ensure_ready(client: httpx.AsyncClient, *bases: str) -> bool:
     """Wait out a cold start: poll /health per stage, bounded by cold_start_budget.
 
-    Avoids racing the first real call against a Flash 503. Empty URLs are skipped;
-    returns False if a stage never comes up.
+    Skips stages confirmed ready within ready_cache_ttl so warm requests pay no pre-flight
+    RTT; a stage gone cold meanwhile is absorbed by the retry layer on the real call. Empty
+    URLs are skipped; returns False if a stage never comes up.
     """
-    targets = [base for base in bases if base]
+    targets = [base for base in bases if base and not _recently_ready(base)]
     if not targets:
         return True
     results = await asyncio.gather(
@@ -171,9 +189,12 @@ async def _speak(client: httpx.AsyncClient, queue: asyncio.Queue[Item]) -> Async
 async def _health_ok(client: httpx.AsyncClient, base: str) -> bool:
     try:
         r = await client.get(f"{base}/health", timeout=30)
-        return r.status_code == 200
     except httpx.HTTPError:
         return False
+    if r.status_code == 200:
+        _mark_ready(base)
+        return True
+    return False
 
 
 async def _poll_health(client: httpx.AsyncClient, base: str, budget: float) -> bool:
