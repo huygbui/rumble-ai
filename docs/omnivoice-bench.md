@@ -16,6 +16,9 @@ Cold-start and streaming rows are single samples; warm rows are the median of 3.
 
 ## 1. Latency / throughput
 
+> **Historical — superseded by [§1b (re-measured 2026-06-16)](#1b-re-measured-2026-06-16--gpu--num_step-ab).**
+> The current stack is ~2× faster than the table below.
+
 | Scenario | OmniVoice | Read |
 |---|---:|---|
 | **Cold start** (scaled-to-zero -> 1st req) | **63.7 s** | weights load from cache on A10G |
@@ -33,7 +36,46 @@ non-autoregressive masked-diffusion model. It unmasks the whole acoustic-token g
 2. True server-side streaming is architecturally unavailable; app-side clause chunking is
    the TTFA lever.
 3. The real server-side latency knob is the diffusion `num_step` value (32 -> 24 -> 16),
-   with a quality tradeoff.
+   with a quality tradeoff. _(Update: §1b found this is **not** a measurable latency lever
+   on the current stack — see below.)_
+
+## 1b. Re-measured 2026-06-16 — GPU × num_step A/B
+
+§1's numbers are stale. Re-running warm (median-of-3, on a clean pass *after* the cold-start
+settles) against the current stack, plus a four-corner sweep of **{A10G, L40S} × {32, 24}
+diffusion steps**, settles the GPU-tier and `num_step` questions.
+
+| Warm, median-of-3 | A10G/32 (live) | A10G/24 | L40S/32 | L40S/24 |
+|---|---:|---:|---:|---:|
+| short (2.2 s audio) — **TTFA-relevant** | 1.14 s | 1.04 s | 1.39 s | 1.11 s |
+| medium (9.6 s audio) | 2.28 s | 2.24 s | 1.48 s | 1.22 s |
+| long (28.8 s audio) | 6.78 s | 6.74 s | 2.88 s | 2.86 s |
+| cold start | ~12 s | ~119 s\* | ~106 s\* | ~110 s\* |
+| Modal $/hr (approx) | ~1.10 | ~1.10 | ~1.95 | ~1.95 |
+
+\* first-deploy cold start; the live A10G/32 was already warm.
+
+**Findings:**
+
+1. **Current A10G/32 is ~2× faster than §1** (warm short 1.14 s vs 2.66 s; cold ~12 s vs
+   63.7 s). The stack improved since 2026-06-14 — treat §1 as historical.
+2. **num_step 32→24 is not a latency lever.** On the most diffusion-bound metric (long) it is
+   flat on both GPUs (A10G 6.78→6.74 s; L40S 2.88→2.86 s). Step count is not the wall-clock
+   bottleneck; fixed pipeline cost dominates (consistent with "graph-bound, not FLOP-bound").
+   Because of that, latency can't even confirm the override alters output — it may be quality-
+   only or a no-op; verify by ear if ever used. `num_step` is **deploy-time** (HF config via
+   `--hf-overrides`), **not** a request field: a body `num_step` is silently ignored.
+3. **L40S helps only the long tail, never TTFA.** vs A10G/32: long 2.4× faster, medium 1.5×,
+   but short is slightly *slower* (1.14→1.39 s) — short clauses are fixed-overhead bound, so a
+   faster GPU can't help them. Cold start is ~10× worse (~106 s). Worth the ~$0.85/hr premium
+   only for long single-shot utterances or high concurrency, not for chat TTFA.
+
+**Verdict: stay on A10G/32, 32 steps.** Neither knob improves perceived (TTFA) latency, and
+app-side synth-ahead (`tts_concurrency`) already hides the long-clause region where L40S would
+help. Variance is high (single warm pass per corner: treat ±0.5 s short/medium, ±2 s long as
+noise). Harness + full runbook to re-run this lives on branch `perf/tts-numstep-l40s-bench`
+(`tts/omnivoice.py` env-parameterized by `OMNI_GPU` / `OMNI_NUM_STEP`;
+`docs/tts-numstep-l40s-bench.md`).
 
 ## 2. Quality samples
 

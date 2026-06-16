@@ -20,3 +20,5 @@ Keep only deploy-critical constraints in the serving scripts. Historical finding
 ## OmniVoice
 
 `tts/omnivoice.py` was verified on Modal on 2026-06-15. It snapshots the warm resident model instead of using the vLLM sleep endpoints. `OMNIVOICE_CUDA_GRAPH=0` is kept because OmniVoice has a separate CUDA graph path not covered by vLLM `enforce_eager`.
+
+GPU-tier / `num_step` were A/B'd on 2026-06-16 (see [`omnivoice-bench.md` §1b](./omnivoice-bench.md#1b-re-measured-2026-06-16--gpu--num_step-ab)): **stay on A10G, 32 steps.** `num_step` is deploy-time only — OmniVoice reads `config.num_step` (override at load via `--hf-overrides '{"num_step": N}'`); a request-body `num_step` is ignored. It showed no measurable latency win 32→24. L40S is ~2.4× faster on long synth but slightly slower on short clauses (TTFA), so it's a throughput/long-form lever, not a TTFA one.
