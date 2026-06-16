@@ -164,26 +164,68 @@ async def _text(queue: asyncio.Queue[Item]) -> AsyncIterator[Event]:
     yield _done_event(" ".join(reply))
 
 
+Slot = tuple[str, "asyncio.Task[bytes]"] | Exception | None
+
+
 async def _speak(client: httpx.AsyncClient, queue: asyncio.Queue[Item]) -> AsyncIterator[Event]:
+    """Synthesize clauses up to tts_concurrency deep, but emit them in LLM order.
+
+    A dispatcher pulls clauses in order and kicks off bounded-concurrent synth tasks; the loop
+    below awaits those tasks in that same order. So later clauses' audio is already in flight
+    (no mid-reply playback stall) while emission to the browser stays strictly sequential —
+    the order the Web Audio cursor and the transcript both rely on.
+    """
+    sem = asyncio.Semaphore(settings.tts_concurrency)
+    ordered: asyncio.Queue[Slot] = asyncio.Queue()
+    pending: set[asyncio.Task[bytes]] = set()
+
+    async def synth(text: str) -> bytes:
+        async with sem:  # single back-pressure point: at most tts_concurrency synths run at once
+            return await tts.synthesize(client, text)
+
+    async def dispatch() -> None:
+        while (item := await queue.get()) is not None:
+            if isinstance(item, Exception):
+                await ordered.put(item)  # a source error keeps its place at the stream's tail
+                continue
+            task = asyncio.create_task(synth(item))
+            pending.add(task)
+            await ordered.put((item, task))
+        await ordered.put(None)
+
+    dispatcher = asyncio.create_task(dispatch())
     reply: list[str] = []
     failed = False
-    while (item := await queue.get()) is not None:
-        if isinstance(item, Exception):
-            failed = True
-            yield _error_event(item)
-            continue
-
-        reply.append(item)
-        try:
-            wav = await tts.synthesize(client, item)
-        except Exception as e:
-            yield _clause_event(item)
-            yield _error_event(e)
-            continue
-        yield _clause_event(item, wav_b64=base64.b64encode(wav).decode())
-    if failed:
-        return
-    yield _done_event(" ".join(reply))
+    try:
+        while (slot := await ordered.get()) is not None:
+            if isinstance(slot, Exception):
+                failed = True
+                yield _error_event(slot)
+                continue
+            text, task = slot
+            reply.append(text)
+            try:
+                wav = await task
+            except Exception as e:
+                pending.discard(task)
+                yield _clause_event(text)
+                yield _error_event(e)
+                continue
+            pending.discard(task)
+            yield _clause_event(text, wav_b64=base64.b64encode(wav).decode())
+        if not failed:
+            yield _done_event(" ".join(reply))
+    finally:
+        # Early exit (SSE disconnect) or normal end: tear down the dispatcher and any
+        # in-flight synths so nothing is left running or leaks a connection.
+        dispatcher.cancel()
+        for task in list(pending):
+            task.cancel()
+        with suppress(asyncio.CancelledError):
+            await dispatcher
+        for task in list(pending):
+            with suppress(asyncio.CancelledError, Exception):
+                await task
 
 
 async def _health_ok(client: httpx.AsyncClient, base: str) -> bool:

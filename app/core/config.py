@@ -64,6 +64,10 @@ class AppSettings(BaseSettings):
     omni_instructions: str = "female, child, high pitch"
     omni_seed: int = 58842
     clause_max_len: int = 140
+    # How many clauses to synthesize ahead concurrently. Keeps later clauses' audio ready
+    # before the current one finishes playing (no mid-reply stalls); kept <= the TTS server's
+    # target_inputs so a single reply doesn't saturate the batch. Clauses still emit in order.
+    tts_concurrency: int = 3
 
     stt_url: str = ""
     stt_model: str = "Qwen/Qwen3-ASR-0.6B"
